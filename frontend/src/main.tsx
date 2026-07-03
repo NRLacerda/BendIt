@@ -1,6 +1,7 @@
 import React, { useEffect, useMemo, useState } from "react";
 import { createRoot } from "react-dom/client";
-import { Activity, AlertTriangle, Download, FilePlus2, Globe2, Moon, Play, RefreshCw, Save, Search, Server, Sun } from "lucide-react";
+import * as Dialog from "@radix-ui/react-dialog";
+import { Activity, AlertTriangle, Download, FilePlus2, Globe2, Moon, Play, RefreshCw, Search, Server, Sun, X } from "lucide-react";
 import { Cell, Pie, PieChart, ResponsiveContainer, Tooltip } from "recharts";
 import { api } from "./api";
 import logoUrl from "./assets/bendit-logo1.png";
@@ -54,7 +55,6 @@ function App() {
   const [notice, setNotice] = useState<Notice>(null);
   const [runState, setRunState] = useState("Idle");
   const [progress, setProgress] = useState(0);
-  const [logs, setLogs] = useState<string[]>([]);
   const [projectSearch, setProjectSearch] = useState("");
   const [endpointSearch, setEndpointSearch] = useState("");
   const [resultSearch, setResultSearch] = useState("");
@@ -63,6 +63,9 @@ function App() {
   const [resultMode, setResultMode] = useState<"findings" | "raw">("findings");
   const [selectedResult, setSelectedResult] = useState<TestResult | null>(null);
   const [confirmOpen, setConfirmOpen] = useState(false);
+  const [projectEditorOpen, setProjectEditorOpen] = useState(false);
+  const [projectEditorMode, setProjectEditorMode] = useState<"create" | "edit">("create");
+  const [projectEditorId, setProjectEditorId] = useState<string | null>(null);
 
   const [authType, setAuthType] = useState<AuthType>("jwt");
   const [jwt, setJwt] = useState("");
@@ -83,6 +86,16 @@ function App() {
     document.documentElement.dataset.theme = theme;
     localStorage.setItem("bendit.theme", theme);
   }, [theme]);
+
+  useEffect(() => {
+    if (!notice || notice.type !== "info") {
+      return;
+    }
+    const timer = window.setTimeout(() => {
+      setNotice((current) => (current?.type === "info" ? null : current));
+    }, 3500);
+    return () => window.clearTimeout(timer);
+  }, [notice]);
 
   useEffect(() => {
     loadProjects();
@@ -153,22 +166,29 @@ function App() {
     if (showMessage) info(`Loaded ${loadedEndpoints.length} endpoints and ${loadedResults.length} results`);
   }
 
+  function buildProjectDraft(projectSource: Project): Project {
+    return {
+      ...projectSource,
+      projectId: slugify(projectSource.projectId),
+      name: projectSource.name || "My Project",
+      description: projectSource.description || "",
+      isWebPage: Boolean(projectSource.isWebPage),
+      baseUrl: normalizeTargetUrl(projectSource.baseUrl, Boolean(projectSource.isWebPage)),
+      headers: { Accept: "application/json" },
+      auth: authFromInput(authType, jwt, cookie, headers),
+      outputDir: `bend-results/${slugify(projectSource.projectId)}`
+    };
+  }
+
   async function saveProject() {
     try {
-      const draft: Project = {
-        ...project,
-        projectId: slugify(project.projectId),
-        name: project.name || "My Project",
-        description: project.description || "",
-        isWebPage: Boolean(project.isWebPage),
-        baseUrl: normalizeTargetUrl(project.baseUrl, Boolean(project.isWebPage)),
-        headers: { Accept: "application/json" },
-        auth: authFromInput(authType, jwt, cookie, headers),
-        outputDir: `bend-results/${slugify(project.projectId)}`
-      };
-      const saved = await api.saveProject(draft);
+      const draft = buildProjectDraft(project);
+      const saved = projectEditorMode === "edit" && projectEditorId
+        ? await api.updateProject(projectEditorId, draft)
+        : await api.saveProject(draft);
       setProject(saved);
       setProjects(await api.listProjects());
+      setProjectEditorOpen(false);
       success(`Saved project ${saved.projectId} to ${saved.outputDir}`);
       setView("projects");
     } catch (error) {
@@ -244,14 +264,7 @@ function App() {
   }
 
   async function saveProjectWithoutRedirect() {
-    const draft: Project = {
-      ...project,
-      projectId: slugify(project.projectId),
-      isWebPage: Boolean(project.isWebPage),
-      baseUrl: normalizeTargetUrl(project.baseUrl, Boolean(project.isWebPage)),
-      auth: authFromInput(authType, jwt, cookie, headers),
-      outputDir: `bend-results/${slugify(project.projectId)}`
-    };
+    const draft = buildProjectDraft(project);
     const saved = await api.saveProject(draft);
     setProject(saved);
     setProjects(await api.listProjects());
@@ -280,31 +293,41 @@ function App() {
 
   function newProject() {
     setProject(newProjectTemplate());
-    setEndpoints([]);
-    setResults([]);
     setAuthType("jwt");
     setJwt("");
     setCookie("");
     setHeaders("");
     setApiListText("");
     setApiListFileName("");
-    setView("run");
+    setProjectEditorMode("create");
+    setProjectEditorId(null);
+    setProjectEditorOpen(true);
+  }
+
+  function editProject(target: Project) {
+    setProject(target);
+    setAuthType(target.auth?.type || "none");
+    setJwt("");
+    setCookie("");
+    setHeaders("");
+    setApiListText("");
+    setApiListFileName("");
+    setProjectEditorMode("edit");
+    setProjectEditorId(target.projectId);
+    setProjectEditorOpen(true);
   }
 
   function success(message: string) {
     setNotice({ type: "success", message });
-    setLogs((current) => [`${new Date().toISOString()} ${message}`, ...current].slice(0, 80));
   }
 
   function info(message: string) {
     setNotice({ type: "info", message });
-    setLogs((current) => [`${new Date().toISOString()} ${message}`, ...current].slice(0, 80));
   }
 
   function fail(error: unknown) {
     const message = error instanceof Error ? error.message : String(error);
     setNotice({ type: "error", message });
-    setLogs((current) => [`${new Date().toISOString()} Error: ${message}`, ...current].slice(0, 80));
   }
 
   return (
@@ -328,6 +351,10 @@ function App() {
             </button>
           ))}
         </nav>
+        <Button className="theme-toggle sidebar-toggle" title="Toggle theme" onClick={() => setTheme(theme === "dark" ? "light" : "dark")}>
+          {theme === "dark" ? <Moon size={16} /> : <Sun size={16} />}
+          <span>{theme === "dark" ? "Dark" : "Light"}</span>
+        </Button>
         <div className="run-state">
           <div className="run-state-label">Current run</div>
           <div className="run-state-value">{runState}</div>
@@ -339,14 +366,14 @@ function App() {
           <div>
             <h1>{viewTitle(view)}</h1>
             <p>{viewMeta(view, project)}</p>
+            <div className="selected-project-spot">
+              <span>Selected project</span>
+              <strong>{project?.name || project?.projectId || "No project selected"}</strong>
+              <em>{project.isWebPage ? "Web Page" : "WebAPI"} target</em>
+            </div>
           </div>
           <div className="topbar-actions">
-            <Button className="theme-toggle" title="Toggle theme" onClick={() => setTheme(theme === "dark" ? "light" : "dark")}>
-              {theme === "dark" ? <Moon size={16} /> : <Sun size={16} />}
-              <span>{theme === "dark" ? "Dark" : "Light"}</span>
-            </Button>
             <Button onClick={() => downloadJSON("project.json", project)}><Download size={16} /> JSON</Button>
-            <Button className="primary-button" onClick={saveProject}><Save size={16} /> Save project</Button>
           </div>
         </header>
         {notice && <div className={`toast ${notice.type}`}>{notice.message}</div>}
@@ -362,7 +389,7 @@ function App() {
                 <TextInput value={projectSearch} onChange={(event) => setProjectSearch(event.target.value)} placeholder="Filter projects" />
               </div>
             </div>
-            <ProjectTable projects={filteredProjects} selectedId={project.projectId} onSelect={selectProject} />
+            <ProjectTable projects={filteredProjects} selectedId={project.projectId} onSelect={selectProject} onEdit={editProject} />
           </section>
         )}
         {view === "run" && (
@@ -402,7 +429,6 @@ function App() {
             progress={progress}
             runState={runState}
             onStart={() => setConfirmOpen(true)}
-            onSettingsUpdated={() => info("Run settings updated for the next execution")}
           />
         )}
         {view === "results" && (
@@ -423,11 +449,37 @@ function App() {
             setSelectedResult={setSelectedResult}
           />
         )}
-        <section className="run-log">
-          <div className="section-head"><h2>Execution log</h2><Button onClick={() => setLogs([])}>Clear</Button></div>
-          <ol>{logs.map((entry) => <li key={entry}>{entry}</li>)}</ol>
-        </section>
       </main>
+      <Dialog.Root open={projectEditorOpen} onOpenChange={setProjectEditorOpen}>
+        <Dialog.Portal>
+          <Dialog.Overlay className="dialog-overlay" />
+          <Dialog.Content className="dialog-content project-editor-dialog">
+            <div className="dialog-title-row">
+              <Dialog.Title>{projectEditorMode === "edit" ? "Edit project" : "Create project"}</Dialog.Title>
+              <Dialog.Close className="dialog-close" aria-label="Close"><X size={18} /></Dialog.Close>
+            </div>
+            <ProjectEditor
+              mode={projectEditorMode}
+              project={project}
+              setProject={setProject}
+              authType={authType}
+              setAuthType={setAuthType}
+              jwt={jwt}
+              setJwt={setJwt}
+              cookie={cookie}
+              setCookie={setCookie}
+              headers={headers}
+              setHeaders={setHeaders}
+            />
+            <div className="dialog-actions project-editor-actions">
+              <Dialog.Close>Cancel</Dialog.Close>
+              <Button className="primary-button" onClick={saveProject}>
+                {projectEditorMode === "edit" ? "Save changes" : "Create project"}
+              </Button>
+            </div>
+          </Dialog.Content>
+        </Dialog.Portal>
+      </Dialog.Root>
       <ConfirmDialog open={confirmOpen} onOpenChange={setConfirmOpen} onConfirm={startPipeline} />
     </div>
   );
@@ -464,25 +516,57 @@ function runLabel(run: RunDocument) {
 }
 
 function EndpointTable(props: { endpoints: Endpoint[] }) {
+  const [page, setPage] = useState(1);
+  const [pageSize, setPageSize] = useState(15);
+  const totalPages = Math.max(1, Math.ceil(props.endpoints.length / pageSize));
+  const safePage = Math.min(page, totalPages);
+  const start = props.endpoints.length === 0 ? 0 : (safePage - 1) * pageSize + 1;
+  const end = Math.min(safePage * pageSize, props.endpoints.length);
+  const visibleEndpoints = props.endpoints.slice((safePage - 1) * pageSize, safePage * pageSize);
+
+  useEffect(() => {
+    setPage(1);
+  }, [props.endpoints.length, pageSize]);
+
+  if (props.endpoints.length === 0) {
+    return <div className="empty-state endpoint-empty">No endpoints are currently loaded for this project.</div>;
+  }
+
   return (
-    <div className="table-shell">
-      <table>
-        <thead><tr><th>ID</th><th>Method</th><th>Endpoint</th><th>Source</th><th>Class</th><th>Confidence</th><th>HTTP</th><th>Auth</th></tr></thead>
-        <tbody>
-          {props.endpoints.map((endpoint) => (
-            <tr key={endpoint.id}>
-              <td><code>{endpoint.id}</code></td>
-              <td><span className="pill">{endpoint.method}</span></td>
-              <td className="path-cell">{endpointUrl(endpoint)}</td>
-              <td title={endpoint.sourceDetail || ""}>{endpoint.source.join(", ")}</td>
-              <td><span className={`pill ${endpointClass(endpoint.classification)}`}>{endpoint.classification || endpoint.status}</span></td>
-              <td>{endpoint.confidence ? `${endpoint.confidence}%` : ""}</td>
-              <td>{endpoint.statusCode || ""}</td>
-              <td>{endpoint.authRequired ? <span className="pill good">yes</span> : <span className="pill">no</span>}</td>
-            </tr>
-          ))}
-        </tbody>
-      </table>
+    <div className="endpoint-table-wrap">
+      <div className="table-shell">
+        <table>
+          <thead><tr><th>ID</th><th>Method</th><th>Endpoint</th><th>Source</th><th>Class</th><th>Confidence</th><th>HTTP</th><th>Auth</th></tr></thead>
+          <tbody>
+            {visibleEndpoints.map((endpoint) => (
+              <tr key={endpoint.id}>
+                <td><code>{endpoint.id}</code></td>
+                <td><span className="pill">{endpoint.method}</span></td>
+                <td className="path-cell">{endpointUrl(endpoint)}</td>
+                <td title={endpoint.sourceDetail || ""}>{endpoint.source.join(", ")}</td>
+                <td><span className={`pill ${endpointClass(endpoint.classification)}`}>{endpoint.classification || endpoint.status}</span></td>
+                <td>{endpoint.confidence ? `${endpoint.confidence}%` : ""}</td>
+                <td>{endpoint.statusCode || ""}</td>
+                <td>{endpoint.authRequired ? <span className="pill good">yes</span> : <span className="pill">no</span>}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+      <div className="pagination-bar">
+        <span>{start}-{end} of {props.endpoints.length}</span>
+        <div className="pagination-controls">
+          <select value={pageSize} onChange={(event) => setPageSize(Number(event.target.value))} aria-label="Endpoints per page">
+            <option value={10}>10 / page</option>
+            <option value={15}>15 / page</option>
+            <option value={25}>25 / page</option>
+            <option value={50}>50 / page</option>
+          </select>
+          <Button onClick={() => setPage((value) => Math.max(1, value - 1))} disabled={safePage === 1}>Previous</Button>
+          <span>Page {safePage} of {totalPages}</span>
+          <Button onClick={() => setPage((value) => Math.min(totalPages, value + 1))} disabled={safePage === totalPages}>Next</Button>
+        </div>
+      </div>
     </div>
   );
 }
@@ -535,7 +619,6 @@ function RunView(props: {
   progress: number;
   runState: string;
   onStart: () => void;
-  onSettingsUpdated: () => void;
 }) {
   const summary = summarizeEndpoints(props.endpoints);
   const [showBatterySettings, setShowBatterySettings] = useState(false);
@@ -561,19 +644,6 @@ function RunView(props: {
           <div className="progress-track wide"><div className="progress-fill" style={{ width: `${props.progress}%` }} /></div>
         </div>
       </section>
-
-      <SetupView
-        project={props.project}
-        setProject={props.setProject}
-        authType={props.authType}
-        setAuthType={props.setAuthType}
-        jwt={props.jwt}
-        setJwt={props.setJwt}
-        cookie={props.cookie}
-        setCookie={props.setCookie}
-        headers={props.headers}
-        setHeaders={props.setHeaders}
-      />
 
       <div className="tests-layout aligned">
         <section className="surface discovery-source">
@@ -607,11 +677,11 @@ function RunView(props: {
             <span>{props.parallelWorkers} workers</span>
             <span>{parseLines(props.excludedPaths).length} exclusions</span>
           </div>
-          <div className="battery-actions">
-            <Button onClick={() => setShowBatterySettings((value) => !value)}>{showBatterySettings ? "Hide details" : "Configure tests"}</Button>
-            <Button className="primary-button" onClick={props.onSettingsUpdated}>Update settings</Button>
-          </div>
-        </section>
+        <div className="battery-actions">
+          <Button onClick={() => setShowBatterySettings((value) => !value)}>{showBatterySettings ? "Hide details" : "Configure tests"}</Button>
+          <span className="muted-note inline">Changes apply on the next run.</span>
+        </div>
+      </section>
       </div>
 
       {showBatterySettings && (
@@ -638,7 +708,13 @@ function RunView(props: {
         </section>
       )}
 
-      <section>
+      <section className="endpoint-history">
+        <div className="section-head endpoint-history-head">
+          <div>
+            <h2>Stored discovery</h2>
+            <p>{props.endpoints.length === 0 ? "New runs start with no loaded endpoints." : "Endpoints from the latest saved discovery are paged below."}</p>
+          </div>
+        </div>
         <div className="toolbar">
           <div className="metrics-grid compact discovery-metrics">
             <Metric label="Discovered" value={props.endpoints.length} />
@@ -657,11 +733,11 @@ function RunView(props: {
       <section className="surface run-submit">
         <div>
           <h2>Ready to run</h2>
-          <p>Start saves the project, runs discovery, enqueues endpoints, then executes the selected test battery.</p>
+          <p>Start saves the selected project first, then runs discovery, enqueues endpoints, and executes the selected test battery.</p>
         </div>
         <div className="run-command-actions">
           <div className="run-state-value">{props.runState}</div>
-          <Button className="primary-button start-button" onClick={props.onStart}><Play size={18} /> Start</Button>
+          <Button className="primary-button start-button" onClick={props.onStart}><Play size={18} /> Save & Start</Button>
         </div>
       </section>
     </section>
@@ -693,11 +769,11 @@ function Stepper(props: { progress: number }) {
   );
 }
 
-function ProjectTable(props: { projects: Project[]; selectedId: string; onSelect: (id: string) => void }) {
+function ProjectTable(props: { projects: Project[]; selectedId: string; onSelect: (id: string) => void; onEdit: (project: Project) => void }) {
   return (
     <div className="table-shell">
       <table>
-        <thead><tr><th>Project</th><th>Base URL</th><th>Target</th><th>Auth</th><th>Output</th><th>Updated</th></tr></thead>
+        <thead><tr><th>Project</th><th>Base URL</th><th>Target</th><th>Auth</th><th>Output</th><th>Updated</th><th /></tr></thead>
         <tbody>
           {props.projects.map((project) => (
             <tr key={project.projectId} className={props.selectedId === project.projectId ? "is-selected" : ""} onClick={() => props.onSelect(project.projectId)}>
@@ -707,6 +783,7 @@ function ProjectTable(props: { projects: Project[]; selectedId: string; onSelect
               <td><span className="pill">{project.auth?.type || "none"}</span></td>
               <td className="path-cell">{project.outputDir}</td>
               <td>{project.updatedAt || ""}</td>
+              <td className="row-action-cell"><Button onClick={(event) => { event.stopPropagation(); props.onEdit(project); }}>Edit</Button></td>
             </tr>
           ))}
         </tbody>
@@ -715,7 +792,8 @@ function ProjectTable(props: { projects: Project[]; selectedId: string; onSelect
   );
 }
 
-function SetupView(props: {
+function ProjectEditor(props: {
+  mode: "create" | "edit";
   project: Project;
   setProject: (project: Project) => void;
   authType: AuthType;
@@ -731,7 +809,7 @@ function SetupView(props: {
   return (
     <div className="split-layout">
       <section className="surface form-grid">
-        <Field label="Project ID"><TextInput value={props.project.projectId} onChange={(event) => update({ projectId: event.target.value })} /></Field>
+        <Field label="Project ID"><TextInput value={props.project.projectId} onChange={(event) => update({ projectId: event.target.value })} readOnly={props.mode === "edit"} /></Field>
         <Field label="Name"><TextInput value={props.project.name} onChange={(event) => update({ name: event.target.value })} /></Field>
         <div className="target-type-control full-span" role="radiogroup" aria-label="Target type">
           <button type="button" className={!props.project.isWebPage ? "is-active" : ""} onClick={() => update({ isWebPage: false })}>

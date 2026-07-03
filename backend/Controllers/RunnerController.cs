@@ -33,6 +33,26 @@ public sealed partial class RunnerController(IProjectStore store, RunCoordinator
         return StatusCode(StatusCodes.Status201Created, normalized);
     }
 
+    [HttpPut("projects/{projectId}")]
+    public async Task<IActionResult> UpdateProject(string projectId, [FromBody] Project project, CancellationToken cancellationToken)
+    {
+        try
+        {
+            var existing = await store.LoadProjectAsync(projectId, cancellationToken);
+            var normalized = NormalizeProject(project, store.Root);
+            normalized.ProjectId = existing.ProjectId;
+            normalized.OutputDir = Path.Combine(store.Root, existing.ProjectId).Replace(Path.DirectorySeparatorChar, '/');
+            normalized.CreatedAt = existing.CreatedAt;
+            normalized.UpdatedAt = DateTimeOffset.UtcNow;
+            await store.SaveProjectAsync(normalized, cancellationToken);
+            return Ok(normalized);
+        }
+        catch (FileNotFoundException ex)
+        {
+            return NotFound(new { error = ex.Message });
+        }
+    }
+
     [HttpGet("projects/{projectId}")]
     public async Task<IActionResult> Project(string projectId, CancellationToken cancellationToken)
     {
@@ -132,10 +152,7 @@ public sealed partial class RunnerController(IProjectStore store, RunCoordinator
             : uri.Scheme + "://" + uri.Authority;
         project.OutputDir = Path.Combine(resultsRoot, project.ProjectId).Replace(Path.DirectorySeparatorChar, '/');
         var now = DateTimeOffset.UtcNow;
-        if (project.CreatedAt == default)
-        {
-            project.CreatedAt = now;
-        }
+        project.CreatedAt = project.CreatedAt == default ? now : project.CreatedAt;
 
         project.UpdatedAt = now;
         if (string.IsNullOrEmpty(project.Auth.Type))

@@ -150,6 +150,7 @@ Main backend endpoints:
 GET  /api/health
 GET  /api/projects
 POST /api/projects
+PUT  /api/projects/{id}
 GET  /api/projects/{id}
 GET  /api/projects/{id}/endpoints
 POST /api/projects/{id}/run

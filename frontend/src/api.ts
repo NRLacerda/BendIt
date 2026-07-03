@@ -32,6 +32,12 @@ export const api = {
   saveProject(project: Project): Promise<Project> {
     return request<Project>("/api/projects", { method: "POST", body: JSON.stringify(project) });
   },
+  updateProject(projectId: string, project: Project): Promise<Project> {
+    return request<Project>(`/api/projects/${encodeURIComponent(projectId)}`, {
+      method: "PUT",
+      body: JSON.stringify(project)
+    });
+  },
   getProject(projectId: string): Promise<Project> {
     return request<Project>(`/api/projects/${encodeURIComponent(projectId)}`);
   },
