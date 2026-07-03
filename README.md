@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="bendit-logo1.png" alt="BendIt logo" width="220">
+  <img src="frontend/src/assets/bendit-logo1.png" alt="BendIt logo" width="220">
 </p>
 
 # BendIt
@@ -10,23 +10,24 @@ Use BendIt only against systems you own or are explicitly authorized to test. So
 
 ## Current Features
 
-- Local Go backend serving a React dashboard.
-- Project registration with `projectId`, base URL, description, headers, and masked auth metadata.
+- Local ASP.NET Core backend serving a React dashboard.
+- Project registration with `projectId`, base URL, target type (`WebAPI` or `WebPage`), description, headers, and masked auth metadata.
 - Backend-owned run pipeline:
-  - API spec probing
-  - discovery
+  - discovery orchestration
   - test execution
   - result writing
   - analysis
+- WebPage JavaScript discovery that runs first for WebPage targets and extracts API routes from same-origin scripts.
 - OpenAPI / Swagger discovery using common documentation routes.
-- OpenAPI path and method extraction with `github.com/getkin/kin-openapi`.
+- OpenAPI path and method extraction from JSON specifications.
 - Safe active discovery probing with `GET`, `HEAD`, and `OPTIONS`.
 - Soft-404 baseline detection.
 - Endpoint classification and confidence scoring.
-- Native API list from `internal/resources/api-list.txt`.
-- Custom API list input from the dashboard.
+- Native API list from `backend/Resources/api-list.txt`.
+- Custom API list file attachment from the dashboard.
+- Real HTTP test execution with verb-aware test routing and bounded response capture.
 - Per-project local JSON artifacts under `bend-results/`.
-- Findings-first results view with raw evidence available separately.
+- Results view grouped by endpoint, with per-endpoint health coverage and drill-down test evidence.
 - Theme toggle, project list, progress stepper, and auto-refresh for stored artifacts.
 
 ## Run
@@ -38,33 +39,25 @@ cd frontend
 npm install
 npm run build
 cd ..
-go build -buildvcs=false -o bendit.exe ./cmd/bendit
+dotnet build backend\BendIt.Api.csproj
 ```
 
 Start BendIt:
 
 ```powershell
-.\bendit.exe -addr 127.0.0.1:8080
+dotnet run --project backend\BendIt.Api.csproj --urls http://127.0.0.1:5000
 ```
 
 Open:
 
 ```txt
-http://127.0.0.1:8080
-```
-
-Useful flags:
-
-```txt
--addr          HTTP listen address, default 127.0.0.1:8080
--results-dir   directory for generated JSON artifacts, default bend-results
--frontend-dir  directory containing frontend files, default frontend
+http://127.0.0.1:5000
 ```
 
 During backend development:
 
 ```powershell
-go run ./cmd/bendit -addr 127.0.0.1:8080
+dotnet watch --project backend\BendIt.Api.csproj
 ```
 
 During frontend development:
@@ -79,7 +72,7 @@ npm run dev
 Backend:
 
 ```powershell
-go test ./...
+dotnet build backend\BendIt.Api.csproj
 ```
 
 Frontend build validation:
@@ -89,30 +82,29 @@ cd frontend
 npm run build
 ```
 
-Regenerate the Windows executable:
-
-```powershell
-go build -buildvcs=false -o bendit.exe ./cmd/bendit
-```
-
 ## How It Works
 
 ### Execution Pipeline
 
-The backend audit run is entirely **linear** and progresses through five distinct steps sequentially. Only one step is active at a time; parallelization is strictly constrained within individual phases.
+The backend audit run is entirely **linear**. The outer runner advances one phase at a time, and `DiscoveryOrchestrator` also runs its discovery sub-steps sequentially. Parallelization is strictly constrained within individual phases.
 
 ```mermaid
 graph TD
     A[Start Run] --> B[1. API Spec Probing]
-    B --> C[2. Active Discovery]
+    B --> C[2. Discovery Orchestration]
     C --> D[3. Test Battery]
     D --> E[4. Result Writing]
     E --> F[5. Findings Analysis]
 ```
 
-1. **API Spec Probing**: Looks for documentation entry points (e.g. Swagger / OpenAPI specifications) and registers found candidate routes.
-2. **Active Discovery**: Probes paths using safe methods (`GET`, `HEAD`, `OPTIONS`) to confirm existence and classify them. Normalizes and registers verified endpoints into `endpoints.json`.
-3. **Test Battery**: Takes testable endpoints and runs configured robustness check mutations (parallelized via a worker pool).
+1. **API Spec Probing**: Prepares the run and loads any existing endpoint artifacts.
+2. **Discovery Orchestration**: Runs discovery sub-steps in order:
+   - WebPage JavaScript discovery first when `isWebPage` is `true`.
+   - OpenAPI / Swagger probing when enabled.
+   - Native/custom API-list discovery.
+   - Fallback health/spec candidates when no endpoints were found.
+   Each sub-step hands candidates to the shared verification stage, which can process candidates in parallel.
+3. **Test Battery**: Takes testable endpoints and runs configured robustness checks. Tests are routed by HTTP verb so body-oriented checks run only where request bodies make sense.
 4. **Result Writing**: Aggregates all test execution data and logs to `results.json`.
 5. **Findings Analysis**: Summarizes outcome counts and determines risk highlights for the dashboard.
 
@@ -122,13 +114,13 @@ graph TD
 
 Within the **Test Battery** phase, the process runs as follows:
 
-1. **Filtering**: Endpoints are filtered to include only testable classifications (`confirmed`, `protected`, `method_not_allowed`). Paths matching the exclusion patterns list are ignored.
-2. **Job Generation**: For every target endpoint, a job is generated for each selected robustness test type (e.g., `idMutation`, `massAssignment`, `requestSize`, `fieldSize`).
-3. **Queue Distribution**: These jobs are queued in a single channels pipeline (`chan testJob`).
-4. **Parallel Worker Pool Execution**: A pool of concurrent worker goroutines (configurable via `ParallelWorkers`, defaults to `6`) reads from the queue:
-   - **Mutation**: The request is mutated according to the test type specifications.
-   - **Execution**: The HTTP client executes the request against the target endpoint (attaching masked auth metadata if present).
-   - **Evaluation**: The returned HTTP status, headers, and body are verified.
+1. **Filtering**: Endpoints are filtered to include testable classifications (`confirmed`, `likely_exists`, `protected`, `method_not_allowed`) with confidence >= 60. Paths matching the exclusion patterns list are ignored.
+2. **Verb-Aware Job Generation**: For every target endpoint, BendIt creates only the selected jobs that apply to the endpoint method.
+   - `GET`, `HEAD`, and `OPTIONS` receive reachability/auth/path-oriented checks such as `authConsistency`, `jwtAnalysis`, `idMutation`, `httpMethodValidation`, and response comparison checks.
+   - `POST`, `PUT`, and `PATCH` can also receive body-oriented checks such as `payloadValidation`, `requestSize`, `fieldSize`, `massAssignment`, and `contentTypeValidation`.
+   - Body-oriented checks are skipped for `GET`, `HEAD`, and `OPTIONS`; BendIt does not pretend a GET body was tested.
+3. **Execution**: The HTTP client executes real requests against the target endpoint. `idMutation` changes path identifier placeholders to a different concrete value, while body checks send configured payload sizes.
+4. **Bounded Evidence Capture**: Response bodies are captured from the real API response, capped at 100 KB per test result, with a 5 second request timeout to avoid hanging or large-download traps.
    - **Risk Scoring**: A risk value (0–10) is assigned based on response status changes.
 5. **Collection**: Results are gathered, evaluated for findings (risk >= 5), and persisted.
 
@@ -208,9 +200,11 @@ server_error
 unknown
 ```
 
+Project `project.json` includes `isWebPage`. When `false`, the project is treated as a WebAPI target, the base URL is normalized to the origin, and JavaScript discovery is skipped. When `true`, the project is treated as a WebPage target, the configured page path is preserved, and JavaScript route extraction runs before the other discovery mechanisms.
+
 ## API List Format
 
-Custom API lists use one endpoint per line:
+Attached custom API lists use one endpoint per line:
 
 ```txt
 # comments and blank lines are ignored
@@ -255,11 +249,12 @@ Recommended exclusions for real environments:
 
 Backend:
 
-- Go server entrypoint: `cmd/bendit`
-- Server/API layer: `internal/server`
-- Discovery and test engine: `internal/engine`
-- JSON storage: `internal/storage`
-- Built-in route lists: `internal/resources`
+- ASP.NET Core app in `backend`
+- Server/API layer: `backend/Controllers`
+- Run pipeline: `backend/Runner`
+- Discovery orchestration and steps: `backend/Discovery`
+- JSON storage: `backend/Storage`
+- Built-in route lists: `backend/Resources`
 
 Frontend:
 
@@ -273,7 +268,6 @@ Near-term work:
 
 - Framework default route discovery.
 - `robots.txt` and sitemap discovery.
-- JavaScript route extraction from same-origin assets.
 - Better authenticated discovery with in-memory raw secret handling.
 - More detailed discovery evidence views.
 - CSV/Markdown/HTML report exporters.

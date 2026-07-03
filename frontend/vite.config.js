@@ -5,8 +5,7 @@ export default defineConfig({
   plugins: [react()],
   server: {
     proxy: {
-      "/api": "http://127.0.0.1:8080",
-      "/bendit-logo1.png": "http://127.0.0.1:8080"
+      "/api": "http://127.0.0.1:5000"
     }
   }
 });

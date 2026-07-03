@@ -1,7 +1,9 @@
 import React, { useEffect, useMemo, useState } from "react";
 import { createRoot } from "react-dom/client";
-import { Download, FilePlus2, Moon, Play, RefreshCw, Save, Search, Sun } from "lucide-react";
+import { Activity, AlertTriangle, Download, FilePlus2, Globe2, Moon, Play, RefreshCw, Save, Search, Server, Sun } from "lucide-react";
+import { Cell, Pie, PieChart, ResponsiveContainer, Tooltip } from "recharts";
 import { api } from "./api";
+import logoUrl from "./assets/bendit-logo1.png";
 import { Button, ConfirmDialog, Field, SelectField, TextArea, TextInput, Toggle } from "./components";
 import type { AuthType, Endpoint, Notice, Project, RunDocument, TestResult } from "./types";
 import {
@@ -9,12 +11,12 @@ import {
   downloadJSON,
   maskSecret,
   newProjectTemplate,
-  normalizeBaseUrl,
   parseLines,
   parseNumberList,
   prettyBody,
   riskClass,
-  slugify
+  slugify,
+  normalizeTargetUrl
 } from "./utils";
 import "./styles.css";
 
@@ -39,6 +41,8 @@ const bendTypes = [
   "responseDiffing",
   "timingAnalysis"
 ];
+
+const defaultBendTypes = bendTypes.filter((_, index) => index < 8 || index === 14);
 
 function App() {
   const [theme, setTheme] = useState<Theme>(() => (localStorage.getItem("bendit.theme") as Theme) || "dark");
@@ -67,7 +71,8 @@ function App() {
   const [useSpecDiscovery, setUseSpecDiscovery] = useState(true);
   const [useNativeApiList, setUseNativeApiList] = useState(true);
   const [apiListText, setApiListText] = useState("");
-  const [selectedTypes, setSelectedTypes] = useState<string[]>(bendTypes.filter((_, index) => index < 8 || index === 14));
+  const [apiListFileName, setApiListFileName] = useState("");
+  const [selectedTypes, setSelectedTypes] = useState<string[]>(defaultBendTypes);
   const [maxRequests, setMaxRequests] = useState("200");
   const [parallelWorkers, setParallelWorkers] = useState("6");
   const [fieldSizes, setFieldSizes] = useState("1,10,50,100");
@@ -98,34 +103,18 @@ function App() {
   });
 
   const filteredEndpoints = endpoints.filter((endpoint) => {
-    const haystack = `${endpoint.id} ${endpoint.method} ${endpoint.path} ${endpoint.source.join(" ")}`.toLowerCase();
+    const haystack = `${endpoint.id} ${endpoint.method} ${endpointUrl(endpoint)} ${endpoint.source.join(" ")}`.toLowerCase();
     return !endpointSearch || haystack.includes(endpointSearch.toLowerCase());
   });
+  const endpointSummary = useMemo(() => summarizeEndpoints(endpoints), [endpoints]);
 
   const resultTypes = useMemo(() => Array.from(new Set(results.map((result) => result.bendType))).sort(), [results]);
-  const resultTypeSummary = useMemo(() => {
-    const grouped = new Map<string, TestResult[]>();
-    for (const result of results) {
-      const list = grouped.get(result.bendType) || [];
-      list.push(result);
-      grouped.set(result.bendType, list);
-    }
-    return Array.from(grouped.entries())
-      .map(([bendType, items]) => ({
-        bendType,
-        total: items.length,
-        findings: items.filter((item) => item.interesting).length,
-        maxRisk: Math.max(...items.map((item) => item.risk), 0),
-        lastOutcome: items[items.length - 1]?.outcome || ""
-      }))
-      .sort((left, right) => right.findings - left.findings || right.maxRisk - left.maxRisk || left.bendType.localeCompare(right.bendType));
-  }, [results]);
   const filteredResults = results.filter((result) => {
     const haystack = `${result.bendType} ${result.url} ${result.title} ${result.result.statusCode}`.toLowerCase();
     const riskMatch = riskFilter === "all" ||
-      (riskFilter === "high" && result.risk >= 8) ||
-      (riskFilter === "medium" && result.risk >= 5 && result.risk <= 7) ||
-      (riskFilter === "low" && result.risk <= 4);
+      (riskFilter === "threat" && result.risk >= 7) ||
+      (riskFilter === "warning" && result.risk >= 5 && result.risk < 7) ||
+      (riskFilter === "healthy" && result.risk < 5);
     const modeMatch = resultMode === "raw" || result.interesting;
     return modeMatch && (resultType === "all" || result.bendType === resultType) && riskMatch && (!resultSearch || haystack.includes(resultSearch.toLowerCase()));
   });
@@ -171,7 +160,8 @@ function App() {
         projectId: slugify(project.projectId),
         name: project.name || "My Project",
         description: project.description || "",
-        baseUrl: normalizeBaseUrl(project.baseUrl),
+        isWebPage: Boolean(project.isWebPage),
+        baseUrl: normalizeTargetUrl(project.baseUrl, Boolean(project.isWebPage)),
         headers: { Accept: "application/json" },
         auth: authFromInput(authType, jwt, cookie, headers),
         outputDir: `bend-results/${slugify(project.projectId)}`
@@ -257,7 +247,8 @@ function App() {
     const draft: Project = {
       ...project,
       projectId: slugify(project.projectId),
-      baseUrl: normalizeBaseUrl(project.baseUrl),
+      isWebPage: Boolean(project.isWebPage),
+      baseUrl: normalizeTargetUrl(project.baseUrl, Boolean(project.isWebPage)),
       auth: authFromInput(authType, jwt, cookie, headers),
       outputDir: `bend-results/${slugify(project.projectId)}`
     };
@@ -273,6 +264,7 @@ function App() {
       const text = await file.text();
       const lines = file.name.toLowerCase().endsWith(".json") ? parseApiListJSON(text) : parseLines(text);
       setApiListText(lines.join("\n"));
+      setApiListFileName(file.name);
       success(`Loaded ${lines.length} API-list entries from ${file.name}`);
     } catch (error) {
       fail(error);
@@ -294,6 +286,8 @@ function App() {
     setJwt("");
     setCookie("");
     setHeaders("");
+    setApiListText("");
+    setApiListFileName("");
     setView("run");
   }
 
@@ -317,7 +311,7 @@ function App() {
     <div className="app-shell">
       <aside className="sidebar">
         <div className="brand">
-          <img src="/bendit-logo1.png" alt="BendIt" className="brand-logo" />
+          <img src={logoUrl} alt="BendIt" className="brand-logo" />
           <div>
             <div className="brand-name">BendIt</div>
             <div className="brand-subtitle">API robustness auditor</div>
@@ -355,7 +349,7 @@ function App() {
             <Button className="primary-button" onClick={saveProject}><Save size={16} /> Save project</Button>
           </div>
         </header>
-        {notice && <div className={`notice ${notice.type}`}>{notice.message}</div>}
+        {notice && <div className={`toast ${notice.type}`}>{notice.message}</div>}
         {view === "projects" && (
           <section>
             <div className="toolbar">
@@ -391,7 +385,7 @@ function App() {
             useNativeApiList={useNativeApiList}
             setUseNativeApiList={setUseNativeApiList}
             apiListText={apiListText}
-            setApiListText={setApiListText}
+            apiListFileName={apiListFileName}
             onLoadFile={loadApiListFile}
             selectedTypes={selectedTypes}
             setSelectedTypes={setSelectedTypes}
@@ -408,13 +402,14 @@ function App() {
             progress={progress}
             runState={runState}
             onStart={() => setConfirmOpen(true)}
+            onSettingsUpdated={() => info("Run settings updated for the next execution")}
           />
         )}
         {view === "results" && (
           <ResultsView
             results={filteredResults}
             allResults={results}
-            resultTypeSummary={resultTypeSummary}
+            endpointSummary={endpointSummary}
             resultTypes={resultTypes}
             resultType={resultType}
             setResultType={setResultType}
@@ -472,13 +467,13 @@ function EndpointTable(props: { endpoints: Endpoint[] }) {
   return (
     <div className="table-shell">
       <table>
-        <thead><tr><th>ID</th><th>Method</th><th>Path</th><th>Source</th><th>Class</th><th>Confidence</th><th>HTTP</th><th>Auth</th></tr></thead>
+        <thead><tr><th>ID</th><th>Method</th><th>Endpoint</th><th>Source</th><th>Class</th><th>Confidence</th><th>HTTP</th><th>Auth</th></tr></thead>
         <tbody>
           {props.endpoints.map((endpoint) => (
             <tr key={endpoint.id}>
               <td><code>{endpoint.id}</code></td>
               <td><span className="pill">{endpoint.method}</span></td>
-              <td className="path-cell">{endpoint.path}</td>
+              <td className="path-cell">{endpointUrl(endpoint)}</td>
               <td title={endpoint.sourceDetail || ""}>{endpoint.source.join(", ")}</td>
               <td><span className={`pill ${endpointClass(endpoint.classification)}`}>{endpoint.classification || endpoint.status}</span></td>
               <td>{endpoint.confidence ? `${endpoint.confidence}%` : ""}</td>
@@ -497,6 +492,11 @@ function endpointClass(classification?: string): "good" | "warn" | "danger" | ""
   if (classification === "not_found" || classification === "soft_404") return "danger";
   if (classification) return "warn";
   return "";
+}
+
+function endpointUrl(endpoint: Endpoint) {
+  const port = endpoint.port ? `:${endpoint.port}` : "";
+  return `${endpoint.scheme}://${endpoint.host}${port}${endpoint.path}`;
 }
 
 function RunView(props: {
@@ -518,7 +518,7 @@ function RunView(props: {
   useSpecDiscovery: boolean;
   setUseSpecDiscovery: (value: boolean) => void;
   apiListText: string;
-  setApiListText: (value: string) => void;
+  apiListFileName: string;
   onLoadFile: (file: File | null) => void;
   selectedTypes: string[];
   setSelectedTypes: (types: string[]) => void;
@@ -535,23 +535,32 @@ function RunView(props: {
   progress: number;
   runState: string;
   onStart: () => void;
+  onSettingsUpdated: () => void;
 }) {
-  const processed = props.endpoints.filter((endpoint) => endpoint.status === "processed").length;
+  const summary = summarizeEndpoints(props.endpoints);
+  const [showBatterySettings, setShowBatterySettings] = useState(false);
+  const customListCount = parseLines(props.apiListText).length;
+  const defaultBattery = isDefaultBatterySettings(props);
   return (
     <section className="run-dashboard">
+      <Stepper progress={props.progress} />
+
       <section className="surface run-command">
         <div>
-          <h2>Pipeline</h2>
-          <p>Start saves the project, runs discovery, enqueues endpoints, then executes the selected test battery across the discovered endpoints.</p>
+          <div className="section-title-row">
+            <h2>Pipeline</h2>
+            <span className={`target-badge ${props.project.isWebPage ? "webpage" : "webapi"}`}>
+              {props.project.isWebPage ? <Globe2 size={14} /> : <Server size={14} />}
+              {props.project.isWebPage ? "WebPage" : "WebAPI"}
+            </span>
+          </div>
+          <p>Review project details, discovery sources, and battery settings before starting the sequential run.</p>
         </div>
         <div className="run-command-actions">
           <div className="run-state-value">{props.runState}</div>
           <div className="progress-track wide"><div className="progress-fill" style={{ width: `${props.progress}%` }} /></div>
-          <Button className="primary-button start-button" onClick={props.onStart}><Play size={18} /> Start</Button>
         </div>
       </section>
-
-      <Stepper progress={props.progress} />
 
       <SetupView
         project={props.project}
@@ -566,25 +575,47 @@ function RunView(props: {
         setHeaders={props.setHeaders}
       />
 
-      <div className="tests-layout">
+      <div className="tests-layout aligned">
         <section className="surface discovery-source">
           <div className="section-head">
             <h2>Discovery</h2>
-            <div className="toggle-stack">
-              <Toggle checked={props.useSpecDiscovery} onCheckedChange={props.setUseSpecDiscovery} label="Probe OpenAPI / Swagger" />
-              <Toggle checked={props.useNativeApiList} onCheckedChange={props.setUseNativeApiList} label="Use native API list" />
-            </div>
           </div>
-          <Field label="Custom API list">
-            <TextArea rows={7} value={props.apiListText} onChange={(event) => props.setApiListText(event.target.value)} placeholder={"GET /api/users\nPOST /api/users\nPATCH /api/users/{id}"} />
-          </Field>
-          <div className="file-row">
-            <input type="file" accept=".txt,.json,text/plain,application/json" onChange={(event) => props.onLoadFile(event.target.files?.[0] || null)} />
+          <div className="config-list">
+            <Toggle checked={props.useSpecDiscovery} onCheckedChange={props.setUseSpecDiscovery} label="Probe OpenAPI / Swagger" />
+            <Toggle checked={props.useNativeApiList} onCheckedChange={props.setUseNativeApiList} label="Use native API list" />
+          </div>
+          <div className="attach-row">
+            <label className="attach-button">
+              <input type="file" accept=".txt,.json,text/plain,application/json" onChange={(event) => props.onLoadFile(event.target.files?.[0] || null)} />
+              <FilePlus2 size={16} />
+              Attach API list
+            </label>
+            <span className="muted-note inline">{props.apiListFileName ? `${props.apiListFileName} (${customListCount} entries)` : "No custom list attached"}</span>
           </div>
         </section>
 
-        <section className="surface">
-          <div className="section-head"><h2>Battery</h2><span className="pill">{props.selectedTypes.length} selected</span></div>
+        <section className="surface battery-panel">
+          <div className="section-head">
+            <h2>Battery</h2>
+            <div className="toolbar-group">
+              {defaultBattery && <span className="pill good">Default Settings</span>}
+              <span className="pill">{props.selectedTypes.length} tests</span>
+            </div>
+          </div>
+          <div className="battery-summary">
+            <span>Max {props.maxRequests} requests</span>
+            <span>{props.parallelWorkers} workers</span>
+            <span>{parseLines(props.excludedPaths).length} exclusions</span>
+          </div>
+          <div className="battery-actions">
+            <Button onClick={() => setShowBatterySettings((value) => !value)}>{showBatterySettings ? "Hide details" : "Configure tests"}</Button>
+            <Button className="primary-button" onClick={props.onSettingsUpdated}>Update settings</Button>
+          </div>
+        </section>
+      </div>
+
+      {showBatterySettings && (
+        <section className="surface battery-settings">
           <div className="test-grid compact-tests">
             {bendTypes.map((type) => (
               <label key={type}>
@@ -597,22 +628,23 @@ function RunView(props: {
               </label>
             ))}
           </div>
+          <div className="form-grid settings-grid">
+            <Field label="Max requests per endpoint"><TextInput value={props.maxRequests} onChange={(event) => props.setMaxRequests(event.target.value)} /></Field>
+            <Field label="Parallel workers"><TextInput value={props.parallelWorkers} onChange={(event) => props.setParallelWorkers(event.target.value)} /></Field>
+            <Field label="Field sizes KB"><TextInput value={props.fieldSizes} onChange={(event) => props.setFieldSizes(event.target.value)} /></Field>
+            <Field label="Body sizes KB"><TextInput value={props.bodySizes} onChange={(event) => props.setBodySizes(event.target.value)} /></Field>
+            <Field label="Excluded path patterns" className="full-span"><TextArea rows={4} value={props.excludedPaths} onChange={(event) => props.setExcludedPaths(event.target.value)} /></Field>
+          </div>
         </section>
-      </div>
-
-      <section className="surface form-grid">
-        <Field label="Max requests per endpoint"><TextInput value={props.maxRequests} onChange={(event) => props.setMaxRequests(event.target.value)} /></Field>
-        <Field label="Parallel workers"><TextInput value={props.parallelWorkers} onChange={(event) => props.setParallelWorkers(event.target.value)} /></Field>
-        <Field label="Field sizes KB"><TextInput value={props.fieldSizes} onChange={(event) => props.setFieldSizes(event.target.value)} /></Field>
-        <Field label="Body sizes KB"><TextInput value={props.bodySizes} onChange={(event) => props.setBodySizes(event.target.value)} /></Field>
-        <Field label="Excluded path patterns" className="full-span"><TextArea rows={4} value={props.excludedPaths} onChange={(event) => props.setExcludedPaths(event.target.value)} /></Field>
-      </section>
+      )}
 
       <section>
         <div className="toolbar">
-          <div className="metrics-grid compact">
-            <Metric label="Registered" value={props.endpoints.length} />
-            <Metric label="Processed" value={processed} />
+          <div className="metrics-grid compact discovery-metrics">
+            <Metric label="Discovered" value={props.endpoints.length} />
+            <Metric label="Confirmed" value={summary.confirmed} />
+            <Metric label="Protected" value={summary.protected} />
+            <Metric label="JavaScript" value={summary.javascript} />
           </div>
           <div className="toolbar-group">
             <Button onClick={() => downloadJSON("endpoints.json", { generatedAt: new Date().toISOString(), endpoints: props.endpoints })}><Download size={16} /> Export endpoints</Button>
@@ -620,6 +652,17 @@ function RunView(props: {
           </div>
         </div>
         <EndpointTable endpoints={props.endpoints} />
+      </section>
+
+      <section className="surface run-submit">
+        <div>
+          <h2>Ready to run</h2>
+          <p>Start saves the project, runs discovery, enqueues endpoints, then executes the selected test battery.</p>
+        </div>
+        <div className="run-command-actions">
+          <div className="run-state-value">{props.runState}</div>
+          <Button className="primary-button start-button" onClick={props.onStart}><Play size={18} /> Start</Button>
+        </div>
       </section>
     </section>
   );
@@ -654,12 +697,13 @@ function ProjectTable(props: { projects: Project[]; selectedId: string; onSelect
   return (
     <div className="table-shell">
       <table>
-        <thead><tr><th>Project</th><th>Base URL</th><th>Auth</th><th>Output</th><th>Updated</th></tr></thead>
+        <thead><tr><th>Project</th><th>Base URL</th><th>Target</th><th>Auth</th><th>Output</th><th>Updated</th></tr></thead>
         <tbody>
           {props.projects.map((project) => (
             <tr key={project.projectId} className={props.selectedId === project.projectId ? "is-selected" : ""} onClick={() => props.onSelect(project.projectId)}>
               <td><strong>{project.name || project.projectId}</strong><br /><code>{project.projectId}</code></td>
               <td className="path-cell">{project.baseUrl}</td>
+              <td><span className="pill">{project.isWebPage ? "WebPage" : "WebAPI"}</span></td>
               <td><span className="pill">{project.auth?.type || "none"}</span></td>
               <td className="path-cell">{project.outputDir}</td>
               <td>{project.updatedAt || ""}</td>
@@ -689,6 +733,16 @@ function SetupView(props: {
       <section className="surface form-grid">
         <Field label="Project ID"><TextInput value={props.project.projectId} onChange={(event) => update({ projectId: event.target.value })} /></Field>
         <Field label="Name"><TextInput value={props.project.name} onChange={(event) => update({ name: event.target.value })} /></Field>
+        <div className="target-type-control full-span" role="radiogroup" aria-label="Target type">
+          <button type="button" className={!props.project.isWebPage ? "is-active" : ""} onClick={() => update({ isWebPage: false })}>
+            <Server size={18} />
+            <span><strong>WebAPI</strong><small>Origin-scoped API target</small></span>
+          </button>
+          <button type="button" className={props.project.isWebPage ? "is-active" : ""} onClick={() => update({ isWebPage: true })}>
+            <Globe2 size={18} />
+            <span><strong>Web Page</strong><small>Runs JavaScript discovery first</small></span>
+          </button>
+        </div>
         <Field label="Base URL" className="full-span"><TextInput value={props.project.baseUrl} onChange={(event) => update({ baseUrl: event.target.value })} /></Field>
         <Field label="Description" className="full-span"><TextArea rows={4} value={props.project.description || ""} onChange={(event) => update({ description: event.target.value })} /></Field>
       </section>
@@ -721,7 +775,7 @@ function SetupView(props: {
 function ResultsView(props: {
   results: TestResult[];
   allResults: TestResult[];
-  resultTypeSummary: Array<{ bendType: string; total: number; findings: number; maxRisk: number; lastOutcome: string }>;
+  endpointSummary: EndpointSummary;
   resultTypes: string[];
   resultType: string;
   setResultType: (value: string) => void;
@@ -734,12 +788,20 @@ function ResultsView(props: {
   selectedResult: TestResult | null;
   setSelectedResult: (result: TestResult) => void;
 }) {
-  const selected = props.selectedResult || props.results[0] || null;
-  const critical = props.allResults.filter((result) => result.risk >= 9).length;
-  const high = props.allResults.filter((result) => result.risk >= 7 && result.risk < 9).length;
-  const medium = props.allResults.filter((result) => result.risk >= 5 && result.risk < 7).length;
-  const findings = props.allResults.filter((result) => result.interesting).length;
   const raw = props.allResults.length;
+  const coveredEndpointCount = useMemo(() => new Set(props.allResults.map((result) => result.endpointId)).size, [props.allResults]);
+  const healthData = useMemo(() => endpointHealthData(props.endpointSummary.total, props.allResults), [props.endpointSummary.total, props.allResults]);
+  const healthy = healthData.find((item) => item.name === "Healthy")?.value || 0;
+  const warning = healthData.find((item) => item.name === "Warning")?.value || 0;
+  const threat = healthData.find((item) => item.name === "Threat")?.value || 0;
+  const endpointRows = useMemo(() => endpointResultRows(props.results), [props.results]);
+  const selectedEndpointId = props.selectedResult && endpointRows.some((row) => row.endpointId === props.selectedResult?.endpointId)
+    ? props.selectedResult.endpointId
+    : endpointRows[0]?.endpointId;
+  const selectedEndpointResults = useMemo(() => props.allResults
+    .filter((result) => result.endpointId === selectedEndpointId)
+    .sort((left, right) => right.risk - left.risk || left.bendType.localeCompare(right.bendType)), [props.allResults, selectedEndpointId]);
+  const selected = selectedEndpointResults.find((result) => result.id === props.selectedResult?.id) || selectedEndpointResults[0] || null;
 
   const [activeTab, setActiveTab] = useState<"verdict" | "request" | "response" | "mutation">("verdict");
 
@@ -765,63 +827,31 @@ function ResultsView(props: {
 
   return (
     <section>
-      <div className="metrics-grid">
-        <Metric label="Critical" value={critical} />
-        <Metric label="High" value={high} />
-        <Metric label="Medium" value={medium} />
-        <Metric label="Findings" value={findings} />
+      <div className="results-overview">
+        <Metric label="Discovered endpoints" value={props.endpointSummary.total} />
+        <Metric label="Endpoints tested" value={coveredEndpointCount} />
+        <Metric label="Raw checks" value={raw} />
+        <Metric label="Healthy" value={healthy} tone="good" />
+        <Metric label="Warning" value={warning} tone={warning > 0 ? "warning" : "default"} />
+        <Metric label="Threat" value={threat} tone={threat > 0 ? "danger" : "default"} />
       </div>
 
-      <section className="surface type-summary" style={{ marginBottom: "18px" }}>
+      <section className="surface discovery-breakdown">
         <div className="section-head">
-          <h2>Test execution summary by type</h2>
-          <span className="muted-note">Click a test type to filter endpoints below</span>
+          <h2>Discovery coverage</h2>
+          <span className="muted-note">{props.endpointSummary.testable} testable endpoints</span>
         </div>
-        <div className="table-shell">
-          <table>
-            <thead>
-              <tr>
-                <th>Test Type</th>
-                <th>Probed Endpoints</th>
-                <th>Success Status</th>
-                <th>Risk Level</th>
-                <th>Last Outcome</th>
-              </tr>
-            </thead>
-            <tbody>
-              {props.resultTypeSummary.map((item) => {
-                const succeededCount = item.total - item.findings;
-                const successPct = item.total > 0 ? Math.round((succeededCount / item.total) * 100) : 100;
-                
-                return (
-                  <tr key={item.bendType} onClick={() => props.setResultType(item.bendType)} className={props.resultType === item.bendType ? "is-selected" : ""}>
-                    <td>
-                      <strong style={{ color: "var(--accent)" }}>{item.bendType}</strong>
-                    </td>
-                    <td>{item.total} endpoints tested</td>
-                    <td>
-                      <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
-                        <span className={`pill ${item.findings > 0 ? "danger" : "good"}`}>
-                          {item.findings > 0 ? `${item.findings} Vulnerable` : "All Passed"}
-                        </span>
-                        <span style={{ fontSize: "12px", color: "var(--muted)" }}>
-                          ({successPct}% secure)
-                        </span>
-                      </div>
-                    </td>
-                    <td>
-                      <span className={`pill ${riskClass(item.maxRisk)}`}>
-                        Risk {item.maxRisk}/10
-                      </span>
-                    </td>
-                    <td>
-                      <code style={{ fontSize: "12px" }}>{item.lastOutcome || "-"}</code>
-                    </td>
-                  </tr>
-                );
-              })}
-            </tbody>
-          </table>
+        <div className="coverage-layout">
+          <EndpointHealthChart data={healthData} />
+          <div className="breakdown-grid">
+            <BreakdownItem label="Confirmed" value={props.endpointSummary.confirmed} />
+            <BreakdownItem label="Likely" value={props.endpointSummary.likely} />
+            <BreakdownItem label="Protected" value={props.endpointSummary.protected} />
+            <BreakdownItem label="Method blocked" value={props.endpointSummary.methodNotAllowed} />
+            <BreakdownItem label="JavaScript" value={props.endpointSummary.javascript} />
+            <BreakdownItem label="OpenAPI" value={props.endpointSummary.openapi} />
+            <BreakdownItem label="API list" value={props.endpointSummary.apiList} />
+          </div>
         </div>
       </section>
 
@@ -836,10 +866,10 @@ function ResultsView(props: {
             {props.resultTypes.map((type) => <option key={type} value={type}>{type}</option>)}
           </select>
           <select value={props.riskFilter} onChange={(event) => props.setRiskFilter(event.target.value)}>
-            <option value="all">All risks</option>
-            <option value="high">Risk 8-10</option>
-            <option value="medium">Risk 5-7</option>
-            <option value="low">Risk 1-4</option>
+            <option value="all">All health</option>
+            <option value="threat">Threat</option>
+            <option value="warning">Warning</option>
+            <option value="healthy">Healthy</option>
           </select>
         </div>
         <div className="toolbar-group">
@@ -848,96 +878,73 @@ function ResultsView(props: {
         </div>
       </div>
 
-      <div className="results-layout">
+      <div className="results-layout enhanced">
         <div className="table-shell">
-          <table>
-            <thead><tr><th>Risk</th><th>Outcome</th><th>Type</th><th>Status</th><th>Endpoint</th><th>Time</th></tr></thead>
+          <table className="results-table">
+            <thead><tr><th>Score</th><th>Health</th><th>Endpoint</th><th>Checks</th><th>HTTP</th><th>Last seen</th></tr></thead>
             <tbody>
-              {props.results.map((result) => (
-                <tr key={result.id} className={selected?.id === result.id ? "is-selected" : ""} onClick={() => props.setSelectedResult(result)}>
-                  <td><span className={`pill ${riskClass(result.risk)}`}>{result.risk}</span></td>
+              {endpointRows.map((row) => (
+                <tr key={row.endpointId} className={`${selectedEndpointId === row.endpointId ? "is-selected" : ""} ${row.maxRisk >= 7 ? "finding-row" : ""}`} onClick={() => props.setSelectedResult(row.representative)}>
+                  <td><span className={`risk-score ${riskClass(row.maxRisk)}`}>{row.maxRisk}</span></td>
                   <td>
-                    <span className={`pill ${result.interesting ? "danger" : "good"}`}>
-                      {result.interesting ? "Insecure" : "Secure"}
+                    <span className={`pill ${riskClass(row.maxRisk)}`}>
+                      {healthLabel(row.maxRisk)}
                     </span>
                   </td>
-                  <td>{result.bendType}</td>
-                  <td>{result.result.statusCode}</td>
-                  <td className="path-cell">{result.method} {new URL(result.url).pathname}</td>
-                  <td>{new Date(result.createdAt).toLocaleTimeString()}</td>
+                  <td className="path-cell">{row.method} {safePath(row.url)}</td>
+                  <td>{row.total} tests</td>
+                  <td>{row.statusCodes.join(", ")}</td>
+                  <td>{new Date(row.lastSeenAt).toLocaleTimeString()}</td>
                 </tr>
               ))}
             </tbody>
           </table>
         </div>
 
-        <section className="result-detail" style={{ display: "flex", flexDirection: "column", gap: "10px" }}>
+        <section className="result-detail">
           {!selected ? <div className="empty-state">Select a result to inspect request/response payloads.</div> : (
             <>
-              <div className="section-head" style={{ marginBottom: "8px" }}>
-                <h2>{selected.title}</h2>
-                <span className={`pill ${riskClass(selected.risk)}`}>Risk {selected.risk}</span>
+              <div className="section-head">
+                <h2>{selected.method} {safePath(selected.url)}</h2>
+                <span className={`pill ${riskClass(selected.risk)}`}>{healthLabel(selected.risk)} {selected.risk}</span>
               </div>
 
-              {/* Navigation Tabs */}
-              <div style={{ display: "flex", gap: "6px", borderBottom: "1px solid var(--line)", paddingBottom: "8px", marginBottom: "8px" }}>
+              <div className="test-list">
+                {selectedEndpointResults.map((result) => (
+                  <button key={result.id} className={selected.id === result.id ? "is-active" : ""} onClick={() => props.setSelectedResult(result)}>
+                    <span>{result.bendType}</span>
+                    <strong className={riskClass(result.risk)}>{healthLabel(result.risk)} {result.risk}</strong>
+                  </button>
+                ))}
+              </div>
+
+              <div className="tab-row">
                 {(["verdict", "request", "response", "mutation"] as const).map((tab) => (
-                  <button
-                    key={tab}
-                    onClick={() => setActiveTab(tab)}
-                    style={{
-                      flex: 1,
-                      minHeight: "30px",
-                      fontSize: "12px",
-                      fontWeight: activeTab === tab ? "700" : "450",
-                      border: "1px solid",
-                      borderColor: activeTab === tab ? "var(--accent)" : "var(--line)",
-                      background: activeTab === tab ? "color-mix(in srgb, var(--accent) 15%, var(--panel))" : "var(--panel-strong)",
-                      color: activeTab === tab ? "var(--accent)" : "var(--ink)",
-                      borderRadius: "4px",
-                      padding: "2px 6px"
-                    }}
-                  >
+                  <button key={tab} className={activeTab === tab ? "is-active" : ""} onClick={() => setActiveTab(tab)}>
                     {tab.toUpperCase()}
                   </button>
                 ))}
               </div>
 
-              {/* Tab Contents */}
-              <div style={{ flex: 1, overflow: "auto" }}>
+              <div className="tab-content">
                 {activeTab === "verdict" && (
-                  <div style={{ display: "flex", flexDirection: "column", gap: "12px" }}>
+                  <div className="verdict-panel">
                     {selected.interesting ? (
-                      <div style={{
-                        border: "1px solid color-mix(in srgb, var(--danger) 60%, var(--line))",
-                        background: "color-mix(in srgb, var(--danger) 10%, var(--panel))",
-                        color: "var(--danger)",
-                        padding: "10px 12px",
-                        borderRadius: "6px",
-                        fontSize: "13px",
-                        fontWeight: "600"
-                      }}>
-                        ⚠️ Finding Detected: Endpoint returned vulnerable or unexpected response to payload audit.
+                      <div className="verdict-banner danger">
+                        <AlertTriangle size={16} /> Finding detected: endpoint returned vulnerable or unexpected response to payload audit.
                       </div>
                     ) : (
-                      <div style={{
-                        border: "1px solid color-mix(in srgb, var(--good) 60%, var(--line))",
-                        background: "color-mix(in srgb, var(--good) 10%, var(--panel))",
-                        color: "var(--good)",
-                        padding: "10px 12px",
-                        borderRadius: "6px",
-                        fontSize: "13px",
-                        fontWeight: "600"
-                      }}>
-                        ✓ Correct Handling: Endpoint rejected or safely handled mutated payload (Secure/Blocked).
+                      <div className="verdict-banner good">
+                        <Activity size={16} /> Correct handling: endpoint rejected or safely handled mutated payload.
                       </div>
                     )}
 
-                    <div className="detail-grid" style={{ margin: "0" }}>
+                    <div className="detail-grid no-margin">
                       <Detail label="Test Type" value={selected.bendType} />
+                      <Detail label="Endpoint Tests" value={`${selectedEndpointResults.length}`} />
                       <Detail label="Verdict Class" value={selected.outcome} />
                       <Detail label="Status Code" value={`${selected.result.statusCode} ${selected.result.statusText}`} />
-                      <Detail label="Severity Level" value={selected.severity} />
+                      <Detail label="Endpoint Health" value={healthLabel(selected.risk)} />
                     </div>
 
                     <div style={{ marginTop: "4px" }}>
@@ -982,7 +989,7 @@ function ResultsView(props: {
                         HTTP {selected.result.statusCode} {selected.result.statusText}
                       </span>
                       <span style={{ fontSize: "12px", color: "var(--muted)" }}>
-                        {selected.result.contentType || "unknown content-type"} • {selected.result.bodySizeBytes} bytes
+                        {selected.result.contentType || "unknown content-type"} - {selected.result.bodySizeBytes} bytes
                       </span>
                     </div>
 
@@ -1017,12 +1024,162 @@ function ResultsView(props: {
   );
 }
 
-function Metric(props: { label: string; value: number }) {
-  return <div className="metric"><span>{props.label}</span><strong>{props.value}</strong></div>;
+function Metric(props: { label: string; value: number; tone?: "default" | "good" | "warning" | "danger" }) {
+  return <div className={`metric ${props.tone || ""}`}><span>{props.label}</span><strong>{props.value}</strong></div>;
+}
+
+function healthLabel(risk: number) {
+  if (risk >= 7) return "Threat";
+  if (risk >= 5) return "Warning";
+  return "Healthy";
+}
+
+type EndpointResultRow = {
+  endpointId: string;
+  method: string;
+  url: string;
+  total: number;
+  maxRisk: number;
+  statusCodes: number[];
+  lastSeenAt: string;
+  representative: TestResult;
+};
+
+function endpointResultRows(results: TestResult[]): EndpointResultRow[] {
+  const grouped = new Map<string, TestResult[]>();
+  for (const result of results) {
+    grouped.set(result.endpointId, [...(grouped.get(result.endpointId) || []), result]);
+  }
+
+  return Array.from(grouped.entries())
+    .map(([endpointId, items]) => {
+      const sorted = [...items].sort((left, right) => right.risk - left.risk || new Date(right.createdAt).getTime() - new Date(left.createdAt).getTime());
+      const representative = sorted[0];
+      return {
+        endpointId,
+        method: representative.method,
+        url: representative.url,
+        total: items.length,
+        maxRisk: representative.risk,
+        statusCodes: Array.from(new Set(items.map((item) => item.result.statusCode))).sort((left, right) => left - right),
+        lastSeenAt: items.reduce((latest, item) => new Date(item.createdAt) > new Date(latest) ? item.createdAt : latest, items[0].createdAt),
+        representative
+      };
+    })
+    .sort((left, right) => right.maxRisk - left.maxRisk || new Date(right.lastSeenAt).getTime() - new Date(left.lastSeenAt).getTime());
+}
+
+function safePath(url: string) {
+  try {
+    return new URL(url).pathname;
+  } catch {
+    return url;
+  }
+}
+
+function isDefaultBatterySettings(props: {
+  selectedTypes: string[];
+  maxRequests: string;
+  parallelWorkers: string;
+  fieldSizes: string;
+  bodySizes: string;
+  excludedPaths: string;
+}) {
+  const selected = [...props.selectedTypes].sort();
+  const defaults = [...defaultBendTypes].sort();
+  return selected.length === defaults.length &&
+    selected.every((type, index) => type === defaults[index]) &&
+    props.maxRequests === "200" &&
+    props.parallelWorkers === "6" &&
+    props.fieldSizes === "1,10,50,100" &&
+    props.bodySizes === "1,10,50,100,150" &&
+    props.excludedPaths === "/payment\n/charge\n/transfer\n/withdraw\n/delete";
 }
 
 function Detail(props: { label: string; value: string }) {
   return <div className="detail-item"><span>{props.label}</span><strong>{props.value}</strong></div>;
+}
+
+function BreakdownItem(props: { label: string; value: number }) {
+  return <div className="breakdown-item"><span>{props.label}</span><strong>{props.value}</strong></div>;
+}
+
+type HealthSlice = {
+  name: string;
+  value: number;
+  color: string;
+};
+
+function EndpointHealthChart(props: { data: HealthSlice[] }) {
+  const total = props.data.reduce((sum, item) => sum + item.value, 0);
+  return (
+    <div className="health-chart">
+      <div className="chart-shell">
+        <ResponsiveContainer width="100%" height={180}>
+          <PieChart>
+            <Pie data={props.data} dataKey="value" nameKey="name" innerRadius={48} outerRadius={76} paddingAngle={2}>
+              {props.data.map((entry) => <Cell key={entry.name} fill={entry.color} />)}
+            </Pie>
+            <Tooltip formatter={(value, name) => [`${value ?? 0} endpoints`, String(name)]} />
+          </PieChart>
+        </ResponsiveContainer>
+        <div className="chart-center"><strong>{total}</strong><span>endpoints</span></div>
+      </div>
+      <div className="chart-legend">
+        {props.data.map((item) => (
+          <span key={item.name}><i style={{ background: item.color }} />{item.name}: {item.value}</span>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+type EndpointSummary = {
+  total: number;
+  confirmed: number;
+  likely: number;
+  protected: number;
+  methodNotAllowed: number;
+  testable: number;
+  javascript: number;
+  openapi: number;
+  apiList: number;
+};
+
+function summarizeEndpoints(endpoints: Endpoint[]): EndpointSummary {
+  return {
+    total: endpoints.length,
+    confirmed: endpoints.filter((endpoint) => endpoint.classification === "confirmed").length,
+    likely: endpoints.filter((endpoint) => endpoint.classification === "likely_exists").length,
+    protected: endpoints.filter((endpoint) => endpoint.classification === "protected").length,
+    methodNotAllowed: endpoints.filter((endpoint) => endpoint.classification === "method_not_allowed").length,
+    testable: endpoints.filter((endpoint) => ["confirmed", "likely_exists", "protected", "method_not_allowed"].includes(endpoint.classification || "") && (endpoint.confidence || 0) >= 60).length,
+    javascript: endpoints.filter((endpoint) => endpoint.source.includes("javascript")).length,
+    openapi: endpoints.filter((endpoint) => endpoint.source.includes("openapi")).length,
+    apiList: endpoints.filter((endpoint) => endpoint.source.includes("nativeApiList") || endpoint.source.includes("customApiList")).length
+  };
+}
+
+function endpointHealthData(discoveredCount: number, results: TestResult[]): HealthSlice[] {
+  const riskByEndpoint = new Map<string, number>();
+  for (const result of results) {
+    riskByEndpoint.set(result.endpointId, Math.max(riskByEndpoint.get(result.endpointId) || 0, result.risk));
+  }
+
+  let warning = 0;
+  let threat = 0;
+  for (const risk of riskByEndpoint.values()) {
+    if (risk >= 7) threat++;
+    else if (risk >= 5) warning++;
+  }
+
+  const total = Math.max(discoveredCount, riskByEndpoint.size);
+  const healthy = Math.max(total - warning - threat, 0);
+  return [
+    { name: "Healthy", value: healthy, color: "var(--good)" },
+    { name: "Warning", value: warning, color: "var(--warning)" },
+    { name: "Threat", value: threat, color: "var(--danger)" }
+  ];
 }
 
 createRoot(document.getElementById("root")!).render(<React.StrictMode><App /></React.StrictMode>);

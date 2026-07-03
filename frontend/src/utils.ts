@@ -14,6 +14,17 @@ export function normalizeBaseUrl(value: string): string {
   }
 }
 
+export function normalizeTargetUrl(value: string, isWebPage: boolean): string {
+  if (!isWebPage) return normalizeBaseUrl(value);
+  try {
+    const url = new URL(value);
+    url.hash = "";
+    return url.toString();
+  } catch {
+    return value;
+  }
+}
+
 export function maskSecret(value: string): string {
   if (!value) return "";
   if (value.length <= 10) return "***";
@@ -60,6 +71,7 @@ export function newProjectTemplate(): Project {
     name: "My Project",
     description: "",
     baseUrl: "https://api.example.com",
+    isWebPage: false,
     headers: { Accept: "application/json" },
     auth: { type: "jwt", headerName: "Authorization", scheme: "Bearer", tokenMasked: "" },
     outputDir: "bend-results/my-project",

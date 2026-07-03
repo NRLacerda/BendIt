@@ -1,10 +1,12 @@
 export type AuthType = "jwt" | "cookie" | "headers" | "none";
+export type TargetType = "webApi" | "webPage";
 
 export type Project = {
   projectId: string;
   name: string;
   description?: string;
   baseUrl: string;
+  isWebPage?: boolean;
   headers?: Record<string, string>;
   auth: AuthConfig;
   outputDir: string;
@@ -26,6 +28,7 @@ export type Endpoint = {
   method: string;
   scheme: string;
   host: string;
+  port?: number | null;
   path: string;
   queryParams: string[];
   source: string[];

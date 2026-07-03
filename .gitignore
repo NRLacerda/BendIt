@@ -1,0 +1,60 @@
+# Binaries and build outputs
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+*.test
+*.out
+bin/
+obj/
+dist/
+build/
+
+# .NET / NuGet artifacts
+[Bb]in/
+[Oo]bj/
+TestResults/
+artifacts/
+*.user
+*.suo
+*.rsuser
+*.userosscache
+*.sln.docstates
+*.nupkg
+*.snupkg
+*.nuspec
+packages/
+.nuget/
+# Go workspace and coverage artifacts
+go.work
+go.work.sum
+coverage.out
+coverage.html
+
+# Node / frontend artifacts
+node_modules/
+*.tsbuildinfo
+
+# BendIt local output
+bend-results/
+
+# Logs and runtime files
+*.log
+*.pid
+*.tmp
+tmp/
+temp/
+
+# OS files
+.DS_Store
+Thumbs.db
+Desktop.ini
+
+# Editor and IDE files
+.idea/
+.vscode/
+.vs/
+*.swp
+*.swo
+*~
