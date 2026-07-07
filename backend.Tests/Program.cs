@@ -24,7 +24,11 @@ var tests = new List<(string Name, Func<Task> Run)>
     ("rate limit validator detects throttled burst", RateLimitValidatorDetectsThrottledBurst),
     ("rate limit validator detects missing throttling", RateLimitValidatorDetectsMissingThrottling),
     ("rate limit validator detects degraded post-burst response", RateLimitValidatorDetectsDegradedPostBurstResponse),
-    ("rate limit validator caps requested burst size", RateLimitValidatorCapsRequestedBurstSize)
+    ("rate limit validator caps requested burst size", RateLimitValidatorCapsRequestedBurstSize),
+    ("content type validator accepts secure json only endpoint", ContentTypeValidatorAcceptsSecureJsonOnlyEndpoint),
+    ("content type validator flags text plain json acceptance", ContentTypeValidatorFlagsTextPlainJsonAcceptance),
+    ("content type validator flags missing content type acceptance", ContentTypeValidatorFlagsMissingContentTypeAcceptance),
+    ("content type validator skips get endpoints", ContentTypeValidatorSkipsGetEndpoints)
 };
 
 foreach (var test in tests)
@@ -674,6 +678,140 @@ static async Task RateLimitValidatorCapsRequestedBurstSize()
 
 }
 
+static async Task ContentTypeValidatorAcceptsSecureJsonOnlyEndpoint()
+{
+    await using var server = await LocalApiServer.StartAsync();
+    var endpoint = EndpointFor(server, "endpoint_content_type_strict", "/api/content-type/strict", "POST");
+
+    var results = await new TestBatteryRunner().RunAsync(new Project
+    {
+        ProjectId = "content-type-strict",
+        BaseUrl = server.BaseUrl,
+        Auth = new AuthConfig { Type = "none" }
+    }, [endpoint], new TestRunRequest
+    {
+        BendTypes = ["contentTypeValidation"],
+        ParallelWorkers = 1
+    }, CancellationToken.None);
+
+    var result = results.Results.Single();
+    if (result.Risk >= 5 || result.Interesting)
+    {
+        throw new InvalidOperationException("expected strict content-type enforcement to be low risk");
+    }
+
+    if (!result.Evidence.Contains("text/plain JSON was rejected", StringComparison.OrdinalIgnoreCase) ||
+        !result.Evidence.Contains("missing Content-Type JSON was rejected", StringComparison.OrdinalIgnoreCase))
+    {
+        throw new InvalidOperationException("expected contentTypeValidation evidence to mention both invalid content-type rejections");
+    }
+
+    if (!result.Mutation.TryGetValue("baselineStatus", out var baselineStatus) || Convert.ToInt32(baselineStatus) != 200 ||
+        !result.Mutation.TryGetValue("textPlainStatus", out var textPlainStatus) || Convert.ToInt32(textPlainStatus) != 415 ||
+        !result.Mutation.TryGetValue("missingContentTypeStatus", out var missingStatus) || Convert.ToInt32(missingStatus) != 415)
+    {
+        throw new InvalidOperationException("expected contentTypeValidation mutation to record baseline, text/plain, and missing content-type statuses");
+    }
+}
+
+static async Task ContentTypeValidatorFlagsTextPlainJsonAcceptance()
+{
+    await using var server = await LocalApiServer.StartAsync();
+    var endpoint = EndpointFor(server, "endpoint_content_type_text_plain", "/api/content-type/text-plain-accepted", "POST");
+
+    var results = await new TestBatteryRunner().RunAsync(new Project
+    {
+        ProjectId = "content-type-text-plain",
+        BaseUrl = server.BaseUrl,
+        Auth = new AuthConfig { Type = "none" }
+    }, [endpoint], new TestRunRequest
+    {
+        BendTypes = ["contentTypeValidation"],
+        ParallelWorkers = 1
+    }, CancellationToken.None);
+
+    var result = results.Results.Single();
+    if (result.Risk < 5 || !result.Interesting)
+    {
+        throw new InvalidOperationException("expected text/plain JSON acceptance to be a content-type finding");
+    }
+
+    if (!result.Evidence.Contains("text/plain JSON was accepted", StringComparison.OrdinalIgnoreCase))
+    {
+        throw new InvalidOperationException("expected contentTypeValidation evidence to mention text/plain acceptance");
+    }
+
+    if (!result.Request.HeadersMasked.TryGetValue("Content-Type", out var contentType) || contentType != "text/plain")
+    {
+        throw new InvalidOperationException("expected representative contentTypeValidation request header to be text/plain");
+    }
+
+    if (string.IsNullOrWhiteSpace(result.OwaspCategory) || !result.OwaspCategory.StartsWith("API8:", StringComparison.Ordinal))
+    {
+        throw new InvalidOperationException("expected contentTypeValidation to map to OWASP API8");
+    }
+}
+
+static async Task ContentTypeValidatorFlagsMissingContentTypeAcceptance()
+{
+    await using var server = await LocalApiServer.StartAsync();
+    var endpoint = EndpointFor(server, "endpoint_content_type_missing", "/api/content-type/missing-accepted", "POST");
+
+    var results = await new TestBatteryRunner().RunAsync(new Project
+    {
+        ProjectId = "content-type-missing",
+        BaseUrl = server.BaseUrl,
+        Auth = new AuthConfig { Type = "none" }
+    }, [endpoint], new TestRunRequest
+    {
+        BendTypes = ["contentTypeValidation"],
+        ParallelWorkers = 1
+    }, CancellationToken.None);
+
+    var result = results.Results.Single();
+    if (result.Risk < 5 || !result.Interesting)
+    {
+        throw new InvalidOperationException("expected missing Content-Type JSON acceptance to be a content-type finding");
+    }
+
+    if (!result.Evidence.Contains("missing Content-Type JSON was accepted", StringComparison.OrdinalIgnoreCase))
+    {
+        throw new InvalidOperationException("expected contentTypeValidation evidence to mention missing Content-Type acceptance");
+    }
+
+    if (!result.Request.HeadersMasked.TryGetValue("Content-Type", out var contentType) || contentType != "<missing>")
+    {
+        throw new InvalidOperationException("expected representative contentTypeValidation request header to show missing Content-Type");
+    }
+
+    if (!result.Mutation.TryGetValue("missingContentTypeStatus", out var missingStatus) || Convert.ToInt32(missingStatus) != 200)
+    {
+        throw new InvalidOperationException("expected contentTypeValidation mutation to record missing content-type acceptance status");
+    }
+}
+
+static async Task ContentTypeValidatorSkipsGetEndpoints()
+{
+    await using var server = await LocalApiServer.StartAsync();
+    var endpoint = EndpointFor(server, "endpoint_content_type_get", "/api/content-type/strict");
+
+    var results = await new TestBatteryRunner().RunAsync(new Project
+    {
+        ProjectId = "content-type-get-skip",
+        BaseUrl = server.BaseUrl,
+        Auth = new AuthConfig { Type = "none" }
+    }, [endpoint], new TestRunRequest
+    {
+        BendTypes = ["contentTypeValidation"],
+        ParallelWorkers = 1
+    }, CancellationToken.None);
+
+    if (results.Results.Count != 0)
+    {
+        throw new InvalidOperationException("expected contentTypeValidation to be skipped for GET endpoints");
+    }
+}
+
 static void AssertContains(IEnumerable<string> lines, string expected)
 {
     if (!lines.Any(line => string.Equals(line.Trim(), expected, StringComparison.Ordinal)))
@@ -693,13 +831,13 @@ static string RepoRoot()
     return dir?.FullName ?? throw new InvalidOperationException("unable to locate repository root");
 }
 
-static Endpoint EndpointFor(LocalApiServer server, string id, string path)
+static Endpoint EndpointFor(LocalApiServer server, string id, string path, string method = "GET")
 {
     var uri = new Uri(server.BaseUrl);
     return new Endpoint
     {
         Id = id,
-        Method = "GET",
+        Method = method,
         Scheme = uri.Scheme,
         Host = uri.Host,
         Port = uri.Port,
@@ -758,6 +896,9 @@ sealed class LocalApiServer : IAsyncDisposable
         catch (OperationCanceledException)
         {
         }
+        catch (ObjectDisposedException)
+        {
+        }
         finally
         {
             _stop.Dispose();
@@ -778,11 +919,19 @@ sealed class LocalApiServer : IAsyncDisposable
         await using var stream = client.GetStream();
         using var reader = new StreamReader(stream, Encoding.ASCII, leaveOpen: true);
         var requestLine = await reader.ReadLineAsync() ?? "";
-        while (!string.IsNullOrEmpty(await reader.ReadLineAsync()))
+        var headers = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        string? headerLine;
+        while (!string.IsNullOrEmpty(headerLine = await reader.ReadLineAsync()))
         {
+            var separator = headerLine.IndexOf(':');
+            if (separator > 0)
+            {
+                headers[headerLine[..separator].Trim()] = headerLine[(separator + 1)..].Trim();
+            }
         }
 
         var parts = requestLine.Split(' ', StringSplitOptions.RemoveEmptyEntries);
+        var method = parts.Length >= 1 ? parts[0] : "";
         var path = parts.Length >= 2 ? parts[1].Split('?', 2)[0] : "/";
         var count = CountRequest(path);
         if (path == "/api/orgrow/grow/isalive")
@@ -806,6 +955,24 @@ sealed class LocalApiServer : IAsyncDisposable
         if (path is "/api/orgrow/environment/setup/1/1" or "/api/orgrow/environment/setup/2/2" or "/api/orgrow/product/create")
         {
             await WriteAsync(stream, 200, """{"ok":true}""", "application/json");
+            return;
+        }
+
+        if (path == "/api/content-type/strict")
+        {
+            await WriteContentTypeResponseAsync(stream, method, headers, acceptTextPlain: false, acceptMissing: false);
+            return;
+        }
+
+        if (path == "/api/content-type/text-plain-accepted")
+        {
+            await WriteContentTypeResponseAsync(stream, method, headers, acceptTextPlain: true, acceptMissing: false);
+            return;
+        }
+
+        if (path == "/api/content-type/missing-accepted")
+        {
+            await WriteContentTypeResponseAsync(stream, method, headers, acceptTextPlain: false, acceptMissing: true);
             return;
         }
 
@@ -875,5 +1042,28 @@ sealed class LocalApiServer : IAsyncDisposable
             $"HTTP/1.1 {status} {reason}\r\nContent-Type: {contentType}\r\n{extraHeaders}Content-Length: {bytes.Length}\r\nConnection: close\r\n\r\n");
         await stream.WriteAsync(header);
         await stream.WriteAsync(bytes);
+    }
+
+    private static async Task WriteContentTypeResponseAsync(Stream stream, string method, Dictionary<string, string> headers, bool acceptTextPlain, bool acceptMissing)
+    {
+        if (!string.Equals(method, "POST", StringComparison.OrdinalIgnoreCase))
+        {
+            await WriteAsync(stream, 405, """{"error":"method not allowed"}""", "application/json");
+            return;
+        }
+
+        headers.TryGetValue("Content-Type", out var contentType);
+        var normalized = contentType?.Split(';', 2)[0].Trim();
+        var accepted = string.Equals(normalized, "application/json", StringComparison.OrdinalIgnoreCase) ||
+                       acceptTextPlain && string.Equals(normalized, "text/plain", StringComparison.OrdinalIgnoreCase) ||
+                       acceptMissing && string.IsNullOrWhiteSpace(normalized);
+
+        if (accepted)
+        {
+            await WriteAsync(stream, 200, """{"accepted":true}""", "application/json");
+            return;
+        }
+
+        await WriteAsync(stream, 415, """{"error":"unsupported media type"}""", "application/json");
     }
 }

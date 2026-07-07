@@ -23,7 +23,7 @@ This file groups the current BendIt features by workflow stage and also keeps th
 - **Request size validation**: Expands request payloads to test size limits and parser resilience.
 - **Field size validation**: Expands individual fields to probe validation and parser boundaries.
 - **Mass assignment testing**: Adds privileged or unexpected JSON fields to check whether the API accepts them.
-- **Content-type validation**: Probes expected media-type handling for endpoints that should reject ambiguous or wrong content types.
+- **Content-type validation**: Sends valid JSON with `application/json`, `text/plain`, and missing `Content-Type` variants to verify that body-capable endpoints reject ambiguous or wrong media types.
 - **HTTP method validation**: Checks whether endpoints allow only the intended verbs.
 - **Response diffing**: Compares responses to spot inconsistent behavior across states or mutations.
 - **Inventory exposure detection**: Flags live legacy, versioned, internal, debug, documentation, and operational routes.
@@ -60,7 +60,6 @@ This file groups the current BendIt features by workflow stage and also keeps th
 ## Planned Features
 
 - **Function-level authorization heuristics**: Detect routes like `/admin`, `/manage`, `/export`, or similar privileged paths and verify whether they are reachable without proper auth. Maps to OWASP API5.
-- **Content-type enforcement**: Probe alternate or missing content types such as `text/plain` on JSON endpoints to see whether the API enforces the expected media type. Maps to API8 or API10 depending the failure mode.
 - **Parameter pollution**: Send duplicated query and body parameters to check whether the API collapses or mishandles repeated keys. Maps to API10 or API3 depending the result.
 - **CORS validation**: Exercise `Origin` handling and response headers to look for wildcard origins, reflected origins, or unsafe credential exposure. Maps to API8.
 - **Timing and error differential analysis**: Compare baseline and mutated responses to detect enumeration, inconsistent auth failures, or verbose error behavior. Maps to API1, API2, or API9 depending the signal.
