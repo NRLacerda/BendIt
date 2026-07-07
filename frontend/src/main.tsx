@@ -1,6 +1,6 @@
 import React, { useEffect, useMemo, useState } from "react";
 import { createRoot } from "react-dom/client";
-import { Activity, AlertTriangle, Download, FilePlus2, Globe2, Moon, Play, RefreshCw, Search, Server, Sun } from "lucide-react";
+import { Activity, AlertTriangle, Download, Eye, FilePlus2, Globe2, Moon, Play, RefreshCw, Search, Server, Sun } from "lucide-react";
 import { Cell, Pie, PieChart, ResponsiveContainer, Tooltip } from "recharts";
 import { api } from "./api";
 import logoUrl from "./assets/bendit-logo1.png";
@@ -20,7 +20,7 @@ import {
 } from "./utils";
 import "./styles.css";
 
-type View = "projects" | "projectForm" | "run" | "execution" | "results";
+type View = "projects" | "projectForm" | "projectRuns" | "run" | "execution" | "results";
 type Theme = "dark" | "light";
 
 const bendTypes = [
@@ -32,23 +32,40 @@ const bendTypes = [
   "fieldSize",
   "massAssignment",
   "idMutation",
+  "inventoryExposure",
   "parameterPollution",
   "contentTypeValidation",
   "corsAnalysis",
   "headerAnalysis",
   "cookieAnalysis",
+  "securityHeaders",
+  "sensitiveDataExposure",
   "rateLimit",
   "responseDiffing",
   "timingAnalysis"
 ];
 
-const defaultBendTypes = bendTypes.filter((_, index) => index < 8 || index === 14);
+const defaultBendTypes = [
+  "authConsistency",
+  "jwtAnalysis",
+  "httpMethodValidation",
+  "payloadValidation",
+  "requestSize",
+  "fieldSize",
+  "massAssignment",
+  "idMutation",
+  "inventoryExposure",
+  "securityHeaders",
+  "sensitiveDataExposure",
+  "responseDiffing"
+];
 
 function App() {
   const [theme, setTheme] = useState<Theme>(() => (localStorage.getItem("bendit.theme") as Theme) || "dark");
   const [view, setView] = useState<View>("projects");
   const [projects, setProjects] = useState<Project[]>([]);
   const [project, setProject] = useState<Project>(() => newProjectTemplate());
+  const [runs, setRuns] = useState<RunDocument[]>([]);
   const [endpoints, setEndpoints] = useState<Endpoint[]>([]);
   const [results, setResults] = useState<TestResult[]>([]);
   const [notice, setNotice] = useState<Notice>(null);
@@ -62,6 +79,7 @@ function App() {
   const [riskFilter, setRiskFilter] = useState("all");
   const [resultMode, setResultMode] = useState<"findings" | "raw">("findings");
   const [selectedResult, setSelectedResult] = useState<TestResult | null>(null);
+  const [selectedRunId, setSelectedRunId] = useState("");
   const [confirmOpen, setConfirmOpen] = useState(false);
   const [projectEditorMode, setProjectEditorMode] = useState<"create" | "edit">("create");
   const [projectEditorId, setProjectEditorId] = useState<string | null>(null);
@@ -148,8 +166,10 @@ function App() {
       setJwt("");
       setCookie("");
       setHeaders("");
-      await refreshArtifacts(loaded.projectId, true);
+      setRuns(await api.listRuns(loaded.projectId));
+      setSelectedRunId("");
       info(`Selected project ${loaded.projectId}`);
+      setView("projectRuns");
     } catch (error) {
       fail(error);
     }
@@ -164,8 +184,50 @@ function App() {
       setCookie("");
       setHeaders("");
       await refreshArtifacts(loaded.projectId, true);
+      setRuns(await api.listRuns(loaded.projectId));
+      setSelectedRunId("");
       info(`Ready to run ${loaded.projectId}`);
       setView("run");
+    } catch (error) {
+      fail(error);
+    }
+  }
+
+  async function openRunResults(run: RunDocument) {
+    try {
+      const loadedResults = await api.getRunResults(run.projectId, run.runId);
+      setCurrentRun(run);
+      setSelectedRunId(run.runId);
+      setResults(loadedResults);
+      setSelectedResult(loadedResults.find((result) => result.interesting) || loadedResults[0] || null);
+      setResultMode("findings");
+      setView("results");
+    } catch (error) {
+      fail(error);
+    }
+  }
+
+  async function downloadRunResults(run: RunDocument) {
+    try {
+      const loadedResults = await api.getRunResults(run.projectId, run.runId);
+      downloadJSON(`${run.projectId}-${run.runId}-results.json`, {
+        generatedAt: new Date().toISOString(),
+        projectId: run.projectId,
+        runId: run.runId,
+        results: loadedResults
+      });
+    } catch (error) {
+      fail(error);
+    }
+  }
+
+  async function refreshProjectRuns() {
+    if (!project.projectId) {
+      return;
+    }
+
+    try {
+      setRuns(await api.listRuns(project.projectId));
     } catch (error) {
       fail(error);
     }
@@ -259,6 +321,8 @@ function App() {
       setRunState("Idle");
       setProgress(100);
       setCurrentRun(completed);
+      setSelectedRunId(completed.runId);
+      setRuns(await api.listRuns(saved.projectId));
       success(`Pipeline completed: ${completed.endpointCount} endpoints, ${completed.findingCount} findings, ${completed.resultCount} raw results`);
       setView("results");
     } catch (error) {
@@ -326,9 +390,11 @@ function App() {
 
   function newProject() {
     setProject(newProjectTemplate());
-    setEndpoints([]);
-    setResults([]);
-    setSelectedResult(null);
+      setEndpoints([]);
+      setResults([]);
+      setSelectedResult(null);
+      setSelectedRunId("");
+      setRuns([]);
     setAuthType("jwt");
     setJwt("");
     setCookie("");
@@ -378,10 +444,9 @@ function App() {
         </div>
         <nav className="nav-list" aria-label="Primary">
           {[
-            ["projects", "Projects"],
-            ["results", "Results"]
+            ["projects", "Projects"]
           ].map(([key, label]) => (
-            <button className={`nav-item ${(view === key || (key === "projects" && view === "projectForm")) ? "is-active" : ""}`} key={key} onClick={() => setView(key as View)}>
+            <button className={`nav-item ${(view === key || (key === "projects" && (view === "projectForm" || view === "projectRuns"))) ? "is-active" : ""}`} key={key} onClick={() => setView(key as View)}>
               {label}
             </button>
           ))}
@@ -399,13 +464,15 @@ function App() {
       <main className="main">
         <header className="topbar">
           <div>
+            <Breadcrumbs
+              view={view}
+              project={project}
+              runId={selectedRunId || currentRun?.runId || ""}
+              onProjects={() => setView("projects")}
+              onProject={() => setView(project.projectId ? "projectRuns" : "projects")}
+            />
             <h1>{viewTitle(view)}</h1>
             <p>{viewMeta(view, project)}</p>
-            <div className="selected-project-spot">
-              <span>Selected project</span>
-              <strong>{project?.name || project?.projectId || "No project selected"}</strong>
-              <em>{project.isWebPage ? "Web Page" : "WebAPI"} target</em>
-            </div>
           </div>
           <div className="topbar-actions">
             <Button onClick={() => downloadJSON("project.json", project)}><Download size={16} /> JSON</Button>
@@ -426,6 +493,17 @@ function App() {
             </div>
             <ProjectTable projects={filteredProjects} selectedId={project.projectId} onSelect={selectProject} onEdit={editProject} onRun={runProject} />
           </section>
+        )}
+        {view === "projectRuns" && (
+          <ProjectRunsView
+            project={project}
+            runs={runs}
+            onRun={() => runProject(project.projectId)}
+            onEdit={() => editProject(project)}
+            onRefresh={refreshProjectRuns}
+            onRead={openRunResults}
+            onDownload={downloadRunResults}
+          />
         )}
         {view === "projectForm" && (
           <section className="project-form-page">
@@ -497,11 +575,12 @@ function App() {
             progress={progress}
             runState={runState}
             onBackToRun={() => setView("run")}
-            onResults={() => setView("results")}
+            onResults={() => currentRun ? openRunResults(currentRun) : setView("results")}
           />
         )}
         {view === "results" && (
           <ResultsView
+            runId={selectedRunId}
             results={filteredResults}
             allResults={results}
             endpointSummary={endpointSummary}
@@ -525,7 +604,7 @@ function App() {
 }
 
 function viewTitle(view: View) {
-  return ({ projects: "Projects", projectForm: "Project", run: "Run", execution: "Execution", results: "Results" })[view];
+  return ({ projects: "Projects", projectForm: "Project", projectRuns: "Project runs", run: "Run", execution: "Execution", results: "Run results" })[view];
 }
 
 function viewMeta(view: View, project: Project) {
@@ -533,10 +612,36 @@ function viewMeta(view: View, project: Project) {
   return ({
     projects: "Select a project or create a target.",
     projectForm: "Create or edit the target configuration. Saving returns to the project list.",
+    projectRuns: `${selected}. Review historical runs or start a new one.`,
     run: `${selected}. Configure discovery and the test battery for this project.`,
     execution: `${selected}. Follow the active run as the backend writes progress.`,
-    results: `${selected}. Inspect stored evidence and export results.`
+    results: `${selected}. Inspect stored evidence for the selected run.`
   })[view];
+}
+
+function Breadcrumbs(props: {
+  view: View;
+  project: Project;
+  runId: string;
+  onProjects: () => void;
+  onProject: () => void;
+}) {
+  const projectLabel = props.project.name || props.project.projectId;
+  return (
+    <nav className="breadcrumbs" aria-label="Breadcrumb">
+      <button type="button" onClick={props.onProjects}>Projects</button>
+      {props.view !== "projects" && projectLabel && (
+        <>
+          <span>/</span>
+          <button type="button" onClick={props.onProject}>{projectLabel}</button>
+        </>
+      )}
+      {props.view === "projectForm" && <><span>/</span><strong>{props.project.projectId ? "Edit" : "New"}</strong></>}
+      {props.view === "run" && <><span>/</span><strong>Run setup</strong></>}
+      {props.view === "execution" && <><span>/</span><strong>Execution</strong></>}
+      {props.view === "results" && <><span>/</span><strong>{props.runId || "Results"}</strong></>}
+    </nav>
+  );
 }
 
 function delay(ms: number) {
@@ -915,6 +1020,119 @@ function Stepper(props: { progress: number }) {
   );
 }
 
+function ProjectRunsView(props: {
+  project: Project;
+  runs: RunDocument[];
+  onRun: () => void;
+  onEdit: () => void;
+  onRefresh: () => void | Promise<void>;
+  onRead: (run: RunDocument) => void;
+  onDownload: (run: RunDocument) => void;
+}) {
+  const latest = props.runs[0];
+  return (
+    <section className="project-runs-page">
+      <section className="surface project-summary">
+        <div>
+          <div className="section-title-row">
+            <h2>{props.project.name || props.project.projectId}</h2>
+            <span className={`target-badge ${props.project.isWebPage ? "webpage" : "webapi"}`}>
+              {props.project.isWebPage ? <Globe2 size={14} /> : <Server size={14} />}
+              {props.project.isWebPage ? "WebPage" : "WebAPI"}
+            </span>
+          </div>
+          <p>{props.project.baseUrl}</p>
+        </div>
+        <div className="project-summary-actions">
+          <Button onClick={props.onEdit}>Edit</Button>
+          <Button onClick={props.onRefresh}><RefreshCw size={16} /> Refresh</Button>
+          <Button className="primary-button" onClick={props.onRun}><Play size={16} /> Run</Button>
+        </div>
+      </section>
+
+      <div className="results-overview">
+        <Metric label="Runs" value={props.runs.length} />
+        <Metric label="Latest endpoints" value={latest?.endpointCount || 0} />
+        <Metric label="Latest checks" value={latest?.resultCount || 0} />
+        <Metric label="Latest findings" value={latest?.findingCount || 0} tone={(latest?.findingCount || 0) > 0 ? "danger" : "default"} />
+      </div>
+
+      <section>
+        <div className="section-head">
+          <h2>Last runs</h2>
+          <span className="muted-note">{props.runs.length === 0 ? "No runs yet" : "Newest first"}</span>
+        </div>
+        <RunHistoryTable runs={props.runs} onRead={props.onRead} onDownload={props.onDownload} />
+      </section>
+    </section>
+  );
+}
+
+function RunHistoryTable(props: {
+  runs: RunDocument[];
+  onRead: (run: RunDocument) => void;
+  onDownload: (run: RunDocument) => void;
+}) {
+  const [page, setPage] = useState(1);
+  const [pageSize, setPageSize] = useState(10);
+  const totalPages = Math.max(1, Math.ceil(props.runs.length / pageSize));
+  const safePage = Math.min(page, totalPages);
+  const start = props.runs.length === 0 ? 0 : (safePage - 1) * pageSize + 1;
+  const end = Math.min(safePage * pageSize, props.runs.length);
+  const visibleRuns = props.runs.slice((safePage - 1) * pageSize, safePage * pageSize);
+
+  useEffect(() => {
+    setPage(1);
+  }, [props.runs.length, pageSize]);
+
+  if (props.runs.length === 0) {
+    return <div className="empty-state">This project has no completed or historical runs yet.</div>;
+  }
+
+  return (
+    <div className="endpoint-table-wrap">
+      <div className="table-shell">
+        <table>
+          <thead><tr><th>Run</th><th>Status</th><th>Started</th><th>Completed</th><th>Progress</th><th>Endpoints</th><th>Checks</th><th>Findings</th><th>Actions</th></tr></thead>
+          <tbody>
+            {visibleRuns.map((run) => (
+              <tr key={run.runId}>
+                <td><code>{run.runId}</code></td>
+                <td><span className={`pill ${run.status === "completed" ? "good" : run.status === "failed" ? "danger" : "warn"}`}>{run.status}</span></td>
+                <td>{formatDateTime(run.startedAt)}</td>
+                <td>{run.completedAt ? formatDateTime(run.completedAt) : ""}</td>
+                <td>{run.progress}%</td>
+                <td>{run.endpointCount}</td>
+                <td>{run.resultCount}</td>
+                <td>{run.findingCount}</td>
+                <td className="row-action-cell">
+                  <div className="project-row-actions">
+                    <Button className="icon-only-button" title={`Read ${run.runId}`} onClick={() => props.onRead(run)}><Eye size={16} /></Button>
+                    <Button className="icon-only-button" title={`Download ${run.runId}`} onClick={() => props.onDownload(run)}><Download size={16} /></Button>
+                  </div>
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+      <div className="pagination-bar">
+        <span>{start}-{end} of {props.runs.length}</span>
+        <div className="pagination-controls">
+          <select value={pageSize} onChange={(event) => setPageSize(Number(event.target.value))} aria-label="Runs per page">
+            <option value={10}>10 / page</option>
+            <option value={15}>15 / page</option>
+            <option value={25}>25 / page</option>
+          </select>
+          <Button onClick={() => setPage((value) => Math.max(1, value - 1))} disabled={safePage === 1}>Previous</Button>
+          <span>Page {safePage} of {totalPages}</span>
+          <Button onClick={() => setPage((value) => Math.min(totalPages, value + 1))} disabled={safePage === totalPages}>Next</Button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function ProjectTable(props: {
   projects: Project[];
   selectedId: string;
@@ -1011,6 +1229,7 @@ function ProjectEditor(props: {
 }
 
 function ResultsView(props: {
+  runId: string;
   results: TestResult[];
   allResults: TestResult[];
   endpointSummary: EndpointSummary;
@@ -1065,6 +1284,10 @@ function ResultsView(props: {
 
   return (
     <section>
+      <div className="section-head">
+        <h2>{props.runId ? `Run ${props.runId}` : "Run results"}</h2>
+        <span className="muted-note">{props.allResults.length} stored checks</span>
+      </div>
       <div className="results-overview">
         <Metric label="Discovered endpoints" value={props.endpointSummary.total} />
         <Metric label="Endpoints tested" value={coveredEndpointCount} />
@@ -1179,6 +1402,7 @@ function ResultsView(props: {
 
                     <div className="detail-grid no-margin">
                       <Detail label="Test Type" value={selected.bendType} />
+                      <Detail label="OWASP Category" value={selected.owaspCategory || "Unmapped"} />
                       <Detail label="Endpoint Tests" value={`${selectedEndpointResults.length}`} />
                       <Detail label="Verdict Class" value={selected.outcome} />
                       <Detail label="Status Code" value={`${selected.result.statusCode} ${selected.result.statusText}`} />
@@ -1191,6 +1415,9 @@ function ResultsView(props: {
                       
                       <strong style={{ display: "block", fontSize: "13px", color: "var(--muted)", marginBottom: "4px" }}>Evidence</strong>
                       <p style={{ margin: "0", fontSize: "13px", lineHeight: "1.4", fontStyle: "italic", color: "var(--muted)" }}>{selected.evidence}</p>
+
+                      <strong style={{ display: "block", fontSize: "13px", color: "var(--muted)", margin: "12px 0 4px 0" }}>Recommendation</strong>
+                      <p style={{ margin: "0", fontSize: "13px", lineHeight: "1.4", color: "var(--muted)" }}>{selected.recommendation || "Review this endpoint behavior against the mapped OWASP category."}</p>
                     </div>
                   </div>
                 )}
@@ -1235,6 +1462,15 @@ function ResultsView(props: {
                     <pre style={{ margin: "0", background: "#0b1014", border: "1px solid var(--line)", padding: "10px" }}>
                       {prettyBody(selected.resultBody) || "Empty response body."}
                     </pre>
+
+                    <strong style={{ display: "block", fontSize: "13px", color: "var(--muted)", margin: "14px 0 6px 0" }}>Response Headers</strong>
+                    {selected.result.headersMasked && Object.keys(selected.result.headersMasked).length > 0 ? (
+                      <pre style={{ margin: "0", background: "#0b1014", border: "1px solid var(--line)", padding: "10px" }}>
+                        {Object.entries(selected.result.headersMasked).map(([name, value]) => `${name}: ${value}`).join("\n")}
+                      </pre>
+                    ) : (
+                      <p style={{ color: "var(--muted)", fontStyle: "italic", fontSize: "13px", margin: "0" }}>No response headers recorded.</p>
+                    )}
                   </div>
                 )}
 
@@ -1313,6 +1549,10 @@ function safePath(url: string) {
   } catch {
     return url;
   }
+}
+
+function formatDateTime(value?: string) {
+  return value ? new Date(value).toLocaleString() : "";
 }
 
 function isDefaultBatterySettings(props: {

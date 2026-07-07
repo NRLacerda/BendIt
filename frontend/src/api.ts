@@ -54,8 +54,19 @@ export const api = {
   getCurrentRun(projectId: string): Promise<RunDocument> {
     return request<RunDocument>(`/api/projects/${encodeURIComponent(projectId)}/runs/current`);
   },
+  async listRuns(projectId: string): Promise<RunDocument[]> {
+    const payload = await request<{ runs: RunDocument[] }>(`/api/projects/${encodeURIComponent(projectId)}/runs`);
+    return payload.runs || [];
+  },
+  getRun(projectId: string, runId: string): Promise<RunDocument> {
+    return request<RunDocument>(`/api/projects/${encodeURIComponent(projectId)}/runs/${encodeURIComponent(runId)}`);
+  },
   async getResults(projectId: string): Promise<TestResult[]> {
     const payload = await request<{ results: TestResult[] }>(`/api/projects/${encodeURIComponent(projectId)}/results`);
+    return payload.results || [];
+  },
+  async getRunResults(projectId: string, runId: string): Promise<TestResult[]> {
+    const payload = await request<{ results: TestResult[] }>(`/api/projects/${encodeURIComponent(projectId)}/runs/${encodeURIComponent(runId)}/results`);
     return payload.results || [];
   }
 };

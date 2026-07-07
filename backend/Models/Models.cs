@@ -128,6 +128,8 @@ public sealed class TestResult
     [JsonPropertyName("outcome")] public string Outcome { get; set; } = "";
     [JsonPropertyName("interesting")] public bool Interesting { get; set; }
     [JsonPropertyName("analysisSummary")] public string AnalysisSummary { get; set; } = "";
+    [JsonPropertyName("owaspCategory")] public string OwaspCategory { get; set; } = "";
+    [JsonPropertyName("recommendation")] public string Recommendation { get; set; } = "";
     [JsonPropertyName("risk")] public int Risk { get; set; }
     [JsonPropertyName("severity")] public string Severity { get; set; } = "";
     [JsonPropertyName("confidence")] public int Confidence { get; set; }
@@ -149,6 +151,7 @@ public sealed class HttpResult
 {
     [JsonPropertyName("statusCode")] public int StatusCode { get; set; }
     [JsonPropertyName("statusText")] public string StatusText { get; set; } = "";
+    [JsonPropertyName("headersMasked")] public Dictionary<string, string> HeadersMasked { get; set; } = [];
     [JsonPropertyName("contentType")] public string ContentType { get; set; } = "";
     [JsonPropertyName("bodySizeBytes")] public int BodySizeBytes { get; set; }
     [JsonPropertyName("durationMs")] public int DurationMs { get; set; }

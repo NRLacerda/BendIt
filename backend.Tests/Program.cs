@@ -14,7 +14,17 @@ var tests = new List<(string Name, Func<Task> Run)>
     ("likely exists health endpoint still produces result evidence", LikelyExistsHealthEndpointProducesResultEvidence),
     ("localhost https discovery falls back to http", LocalhostHttpsDiscoveryFallsBackToHttp),
     ("test battery caps response body capture", TestBatteryCapsResponseBodyCapture),
-    ("test battery routes body tests by http verb", TestBatteryRoutesBodyTestsByHttpVerb)
+    ("test battery routes body tests by http verb", TestBatteryRoutesBodyTestsByHttpVerb),
+    ("test battery maps results to OWASP categories", TestBatteryMapsResultsToOwaspCategories),
+    ("security headers validator records misconfiguration evidence", SecurityHeadersValidatorRecordsMisconfigurationEvidence),
+    ("auth boundary validator sends malformed jwt probes", AuthBoundaryValidatorSendsMalformedJwtProbes),
+    ("id mutation detects query identifier parameters", IdMutationDetectsQueryIdentifierParameters),
+    ("inventory validator flags live legacy routes", InventoryValidatorFlagsLiveLegacyRoutes),
+    ("sensitive data validator reports data classes without values", SensitiveDataValidatorReportsDataClassesWithoutValues),
+    ("rate limit validator detects throttled burst", RateLimitValidatorDetectsThrottledBurst),
+    ("rate limit validator detects missing throttling", RateLimitValidatorDetectsMissingThrottling),
+    ("rate limit validator detects degraded post-burst response", RateLimitValidatorDetectsDegradedPostBurstResponse),
+    ("rate limit validator caps requested burst size", RateLimitValidatorCapsRequestedBurstSize)
 };
 
 foreach (var test in tests)
@@ -277,6 +287,397 @@ static async Task TestBatteryRoutesBodyTestsByHttpVerb()
     }
 }
 
+static async Task TestBatteryMapsResultsToOwaspCategories()
+{
+    await using var server = await LocalApiServer.StartAsync();
+    var uri = new Uri(server.BaseUrl);
+    var endpoint = new Endpoint
+    {
+        Id = "endpoint_owasp",
+        Method = "GET",
+        Scheme = uri.Scheme,
+        Host = uri.Host,
+        Port = uri.Port,
+        Path = "/api/orgrow/environment/setup/{id}/{id}",
+        Classification = "likely_exists",
+        Confidence = 65
+    };
+
+    var results = await new TestBatteryRunner().RunAsync(new Project
+    {
+        ProjectId = "owasp-mapping",
+        BaseUrl = server.BaseUrl,
+        Auth = new AuthConfig { Type = "none" }
+    }, [endpoint], new TestRunRequest
+    {
+        BendTypes = ["idMutation", "authConsistency"],
+        ParallelWorkers = 1
+    }, CancellationToken.None);
+
+    if (results.Results.Any(result => string.IsNullOrWhiteSpace(result.OwaspCategory)))
+    {
+        throw new InvalidOperationException("expected every result to include an OWASP category");
+    }
+
+    if (results.Results.Any(result => string.IsNullOrWhiteSpace(result.Recommendation)))
+    {
+        throw new InvalidOperationException("expected every result to include a recommendation");
+    }
+
+    if (!results.Results.Any(result => result.BendType == "idMutation" && result.OwaspCategory.StartsWith("API1:", StringComparison.Ordinal)))
+    {
+        throw new InvalidOperationException("expected idMutation to map to OWASP API1");
+    }
+}
+
+static async Task SecurityHeadersValidatorRecordsMisconfigurationEvidence()
+{
+    await using var server = await LocalApiServer.StartAsync();
+    var uri = new Uri(server.BaseUrl);
+    var endpoint = new Endpoint
+    {
+        Id = "endpoint_headers",
+        Method = "GET",
+        Scheme = uri.Scheme,
+        Host = uri.Host,
+        Port = uri.Port,
+        Path = "/api/users",
+        Classification = "likely_exists",
+        Confidence = 65
+    };
+
+    var results = await new TestBatteryRunner().RunAsync(new Project
+    {
+        ProjectId = "security-headers",
+        BaseUrl = server.BaseUrl,
+        Auth = new AuthConfig { Type = "none" }
+    }, [endpoint], new TestRunRequest
+    {
+        BendTypes = ["securityHeaders"],
+        ParallelWorkers = 1
+    }, CancellationToken.None);
+
+    var result = results.Results.Single();
+    if (result.OwaspCategory != "API8: Security Misconfiguration")
+    {
+        throw new InvalidOperationException($"expected securityHeaders to map to API8, got {result.OwaspCategory}");
+    }
+
+    if (!result.Evidence.Contains("missing X-Content-Type-Options", StringComparison.OrdinalIgnoreCase))
+    {
+        throw new InvalidOperationException("expected securityHeaders evidence to mention missing X-Content-Type-Options");
+    }
+
+    if (result.Result.HeadersMasked.Count == 0)
+    {
+        throw new InvalidOperationException("expected securityHeaders to persist response headers");
+    }
+}
+
+static async Task AuthBoundaryValidatorSendsMalformedJwtProbes()
+{
+    await using var server = await LocalApiServer.StartAsync();
+    var uri = new Uri(server.BaseUrl);
+    var endpoint = new Endpoint
+    {
+        Id = "endpoint_auth_boundary",
+        Method = "GET",
+        Scheme = uri.Scheme,
+        Host = uri.Host,
+        Port = uri.Port,
+        Path = "/api/users",
+        Classification = "protected",
+        Confidence = 80,
+        AuthRequired = true
+    };
+
+    var results = await new TestBatteryRunner().RunAsync(new Project
+    {
+        ProjectId = "auth-boundary",
+        BaseUrl = server.BaseUrl,
+        Auth = new AuthConfig { Type = "jwt" }
+    }, [endpoint], new TestRunRequest
+    {
+        BendTypes = ["jwtAnalysis"],
+        ParallelWorkers = 1
+    }, CancellationToken.None);
+
+    var result = results.Results.Single();
+    if (!result.Request.HeadersMasked.TryGetValue("Authorization", out var masked) || masked != "Bearer ***")
+    {
+        throw new InvalidOperationException("expected jwtAnalysis to record masked Authorization header");
+    }
+
+    if (!result.Evidence.Contains("malformed bearer token", StringComparison.OrdinalIgnoreCase))
+    {
+        throw new InvalidOperationException("expected jwtAnalysis evidence to mention malformed bearer token");
+    }
+
+    if (result.Risk < 9 || !result.Interesting)
+    {
+        throw new InvalidOperationException("expected protected endpoint accepting malformed JWT to be high risk");
+    }
+}
+
+static async Task IdMutationDetectsQueryIdentifierParameters()
+{
+    await using var server = await LocalApiServer.StartAsync();
+    var uri = new Uri(server.BaseUrl);
+    var endpoint = new Endpoint
+    {
+        Id = "endpoint_query_id",
+        Method = "GET",
+        Scheme = uri.Scheme,
+        Host = uri.Host,
+        Port = uri.Port,
+        Path = "/api/users",
+        QueryParams = ["userId"],
+        Classification = "likely_exists",
+        Confidence = 65
+    };
+
+    var results = await new TestBatteryRunner().RunAsync(new Project
+    {
+        ProjectId = "query-id-mutation",
+        BaseUrl = server.BaseUrl,
+        Auth = new AuthConfig { Type = "none" }
+    }, [endpoint], new TestRunRequest
+    {
+        BendTypes = ["idMutation"],
+        ParallelWorkers = 1
+    }, CancellationToken.None);
+
+    var result = results.Results.SingleOrDefault()
+        ?? throw new InvalidOperationException("expected idMutation to run for query identifier parameter");
+
+    if (!result.Url.Contains("userId=2", StringComparison.OrdinalIgnoreCase))
+    {
+        throw new InvalidOperationException($"expected mutated query identifier in URL, got {result.Url}");
+    }
+
+    if (!result.OwaspCategory.StartsWith("API1:", StringComparison.Ordinal))
+    {
+        throw new InvalidOperationException("expected query idMutation to map to OWASP API1");
+    }
+}
+
+static async Task InventoryValidatorFlagsLiveLegacyRoutes()
+{
+    await using var server = await LocalApiServer.StartAsync();
+    var uri = new Uri(server.BaseUrl);
+    var endpoint = new Endpoint
+    {
+        Id = "endpoint_legacy_inventory",
+        Method = "GET",
+        Scheme = uri.Scheme,
+        Host = uri.Host,
+        Port = uri.Port,
+        Path = "/api/v1/legacy/users",
+        Source = ["customApiList"],
+        Classification = "likely_exists",
+        Confidence = 70
+    };
+
+    var results = await new TestBatteryRunner().RunAsync(new Project
+    {
+        ProjectId = "inventory-exposure",
+        BaseUrl = server.BaseUrl,
+        Auth = new AuthConfig { Type = "none" }
+    }, [endpoint], new TestRunRequest
+    {
+        BendTypes = ["inventoryExposure"],
+        ParallelWorkers = 1
+    }, CancellationToken.None);
+
+    var result = results.Results.SingleOrDefault()
+        ?? throw new InvalidOperationException("expected inventoryExposure to run for legacy route");
+
+    if (!result.OwaspCategory.StartsWith("API9:", StringComparison.Ordinal))
+    {
+        throw new InvalidOperationException($"expected inventoryExposure to map to API9, got {result.OwaspCategory}");
+    }
+
+    if (!result.Evidence.Contains("legacy route", StringComparison.OrdinalIgnoreCase) ||
+        !result.Evidence.Contains("versioned API route", StringComparison.OrdinalIgnoreCase))
+    {
+        throw new InvalidOperationException("expected inventoryExposure evidence to include legacy and versioned route signals");
+    }
+
+    if (result.Risk < 7 || !result.Interesting)
+    {
+        throw new InvalidOperationException("expected live legacy route to be a finding");
+    }
+}
+
+static async Task SensitiveDataValidatorReportsDataClassesWithoutValues()
+{
+    await using var server = await LocalApiServer.StartAsync();
+    var uri = new Uri(server.BaseUrl);
+    var endpoint = new Endpoint
+    {
+        Id = "endpoint_sensitive_profile",
+        Method = "GET",
+        Scheme = uri.Scheme,
+        Host = uri.Host,
+        Port = uri.Port,
+        Path = "/api/profile",
+        Classification = "likely_exists",
+        Confidence = 70
+    };
+
+    var results = await new TestBatteryRunner().RunAsync(new Project
+    {
+        ProjectId = "sensitive-data",
+        BaseUrl = server.BaseUrl,
+        Auth = new AuthConfig { Type = "none" }
+    }, [endpoint], new TestRunRequest
+    {
+        BendTypes = ["sensitiveDataExposure"],
+        ParallelWorkers = 1
+    }, CancellationToken.None);
+
+    var result = results.Results.Single();
+    if (!result.OwaspCategory.StartsWith("API3:", StringComparison.Ordinal))
+    {
+        throw new InvalidOperationException($"expected sensitiveDataExposure to map to API3, got {result.OwaspCategory}");
+    }
+
+    if (!result.Evidence.Contains("credential-shaped response field", StringComparison.OrdinalIgnoreCase) ||
+        !result.Evidence.Contains("email address", StringComparison.OrdinalIgnoreCase))
+    {
+        throw new InvalidOperationException("expected sensitiveDataExposure evidence to report sensitive data classes");
+    }
+
+    if (result.Evidence.Contains("secret-token-value", StringComparison.OrdinalIgnoreCase) ||
+        result.Evidence.Contains("alice@example.com", StringComparison.OrdinalIgnoreCase))
+    {
+        throw new InvalidOperationException("expected sensitiveDataExposure evidence to avoid copying sensitive values");
+    }
+
+    if (!result.SensitiveDataDetected || result.Risk < 8)
+    {
+        throw new InvalidOperationException("expected credential-shaped exposure to be high risk and marked sensitive");
+    }
+}
+
+static async Task RateLimitValidatorDetectsThrottledBurst()
+{
+    await using var server = await LocalApiServer.StartAsync();
+    var endpoint = EndpointFor(server, "endpoint_rate_limit_throttled", "/api/rate-limit/throttled");
+
+    var results = await new TestBatteryRunner().RunAsync(new Project
+    {
+        ProjectId = "rate-limit-throttled",
+        BaseUrl = server.BaseUrl,
+        Auth = new AuthConfig { Type = "none" }
+    }, [endpoint], new TestRunRequest
+    {
+        BendTypes = ["rateLimit"],
+        MaxRequestsPerEndpoint = 5,
+        ParallelWorkers = 1
+    }, CancellationToken.None);
+
+    var result = results.Results.Single();
+    if (result.Risk >= 5 || result.Interesting)
+    {
+        throw new InvalidOperationException("expected throttled burst with headers and healthy post-burst response to be low risk");
+    }
+
+    if (!result.Evidence.Contains("throttling headers observed", StringComparison.OrdinalIgnoreCase) ||
+        !result.Evidence.Contains("429", StringComparison.OrdinalIgnoreCase))
+    {
+        throw new InvalidOperationException("expected rateLimit evidence to mention 429 and throttling headers");
+    }
+}
+
+static async Task RateLimitValidatorDetectsMissingThrottling()
+{
+    await using var server = await LocalApiServer.StartAsync();
+    var endpoint = EndpointFor(server, "endpoint_rate_limit_missing", "/api/rate-limit/open");
+
+    var results = await new TestBatteryRunner().RunAsync(new Project
+    {
+        ProjectId = "rate-limit-missing",
+        BaseUrl = server.BaseUrl,
+        Auth = new AuthConfig { Type = "none" }
+    }, [endpoint], new TestRunRequest
+    {
+        BendTypes = ["rateLimit"],
+        MaxRequestsPerEndpoint = 4,
+        ParallelWorkers = 1
+    }, CancellationToken.None);
+
+    var result = results.Results.Single();
+    if (result.Risk < 5 || !result.Interesting)
+    {
+        throw new InvalidOperationException("expected missing throttling to be suspicious");
+    }
+
+    if (!result.Evidence.Contains("no HTTP 429 observed", StringComparison.OrdinalIgnoreCase) ||
+        !result.Evidence.Contains("no throttling headers observed", StringComparison.OrdinalIgnoreCase))
+    {
+        throw new InvalidOperationException("expected rateLimit evidence to mention missing 429 and headers");
+    }
+}
+
+static async Task RateLimitValidatorDetectsDegradedPostBurstResponse()
+{
+    await using var server = await LocalApiServer.StartAsync();
+    var endpoint = EndpointFor(server, "endpoint_rate_limit_degraded", "/api/rate-limit/degraded");
+
+    var results = await new TestBatteryRunner().RunAsync(new Project
+    {
+        ProjectId = "rate-limit-degraded",
+        BaseUrl = server.BaseUrl,
+        Auth = new AuthConfig { Type = "none" }
+    }, [endpoint], new TestRunRequest
+    {
+        BendTypes = ["rateLimit"],
+        MaxRequestsPerEndpoint = 3,
+        ParallelWorkers = 1
+    }, CancellationToken.None);
+
+    var result = results.Results.Single();
+    if (result.Risk < 6 || !result.Interesting)
+    {
+        throw new InvalidOperationException("expected degraded post-burst behavior to be medium risk");
+    }
+
+    if (!result.Evidence.Contains("post-burst response differed", StringComparison.OrdinalIgnoreCase))
+    {
+        throw new InvalidOperationException("expected rateLimit evidence to mention degraded post-burst response");
+    }
+}
+
+static async Task RateLimitValidatorCapsRequestedBurstSize()
+{
+    await using var server = await LocalApiServer.StartAsync();
+    var endpoint = EndpointFor(server, "endpoint_rate_limit_cap", "/api/rate-limit/cap");
+
+    var results = await new TestBatteryRunner().RunAsync(new Project
+    {
+        ProjectId = "rate-limit-cap",
+        BaseUrl = server.BaseUrl,
+        Auth = new AuthConfig { Type = "none" }
+    }, [endpoint], new TestRunRequest
+    {
+        BendTypes = ["rateLimit"],
+        MaxRequestsPerEndpoint = 50,
+        ParallelWorkers = 1
+    }, CancellationToken.None);
+
+    var result = results.Results.Single();
+    if (!result.Mutation.TryGetValue("burstRequests", out var burstRequests) || Convert.ToInt32(burstRequests) != 10)
+    {
+        throw new InvalidOperationException("expected rateLimit burstRequests mutation value to be capped at 10");
+    }
+
+    if (!result.Mutation.TryGetValue("burstConcurrency", out var burstConcurrency) || Convert.ToInt32(burstConcurrency) != 3)
+    {
+        throw new InvalidOperationException("expected rateLimit burstConcurrency mutation value to be capped at 3");
+    }
+}
+
 static void AssertContains(IEnumerable<string> lines, string expected)
 {
     if (!lines.Any(line => string.Equals(line.Trim(), expected, StringComparison.Ordinal)))
@@ -296,6 +697,22 @@ static string RepoRoot()
     return dir?.FullName ?? throw new InvalidOperationException("unable to locate repository root");
 }
 
+static Endpoint EndpointFor(LocalApiServer server, string id, string path)
+{
+    var uri = new Uri(server.BaseUrl);
+    return new Endpoint
+    {
+        Id = id,
+        Method = "GET",
+        Scheme = uri.Scheme,
+        Host = uri.Host,
+        Port = uri.Port,
+        Path = path,
+        Classification = "likely_exists",
+        Confidence = 70
+    };
+}
+
 sealed class TestEnvironment(string contentRootPath) : IWebHostEnvironment
 {
     public string ApplicationName { get; set; } = "BendIt.Api.Tests";
@@ -310,6 +727,7 @@ sealed class LocalApiServer : IAsyncDisposable
 {
     private readonly TcpListener _listener;
     private readonly CancellationTokenSource _stop = new();
+    private readonly Dictionary<string, int> _requestCounts = new(StringComparer.Ordinal);
     private readonly Task _loop;
 
     private LocalApiServer(TcpListener listener, string baseUrl)
@@ -359,7 +777,7 @@ sealed class LocalApiServer : IAsyncDisposable
         }
     }
 
-    private static async Task RespondAsync(TcpClient client)
+    private async Task RespondAsync(TcpClient client)
     {
         await using var stream = client.GetStream();
         using var reader = new StreamReader(stream, Encoding.ASCII, leaveOpen: true);
@@ -370,13 +788,20 @@ sealed class LocalApiServer : IAsyncDisposable
 
         var parts = requestLine.Split(' ', StringSplitOptions.RemoveEmptyEntries);
         var path = parts.Length >= 2 ? parts[1].Split('?', 2)[0] : "/";
+        var count = CountRequest(path);
         if (path == "/api/orgrow/grow/isalive")
         {
             await WriteAsync(stream, 200, "true", "text/plain");
             return;
         }
 
-        if (path is "/api/users" or "/api/orders" or "/api/items" or "/api/profile" or "/api/health" or "/health")
+        if (path == "/api/profile")
+        {
+            await WriteAsync(stream, 200, """{"email":"alice@example.com","access_token":"secret-token-value"}""", "application/json");
+            return;
+        }
+
+        if (path is "/api/users" or "/api/orders" or "/api/items" or "/api/health" or "/health" or "/api/v1/legacy/users")
         {
             await WriteAsync(stream, 200, """{"ok":true}""", "application/json");
             return;
@@ -394,15 +819,64 @@ sealed class LocalApiServer : IAsyncDisposable
             return;
         }
 
+        if (path == "/api/rate-limit/throttled")
+        {
+            if (count is >= 3 and <= 6)
+            {
+                await WriteAsync(stream, 429, """{"error":"too many requests"}""", "application/json", new Dictionary<string, string>
+                {
+                    ["Retry-After"] = "1",
+                    ["RateLimit-Limit"] = "2",
+                    ["RateLimit-Remaining"] = "0"
+                });
+                return;
+            }
+
+            await WriteAsync(stream, 200, """{"ok":true}""", "application/json");
+            return;
+        }
+
+        if (path == "/api/rate-limit/open" || path == "/api/rate-limit/cap")
+        {
+            await WriteAsync(stream, 200, """{"ok":true}""", "application/json");
+            return;
+        }
+
+        if (path == "/api/rate-limit/degraded")
+        {
+            var body = count >= 5 ? """{"ok":false,"mode":"degraded"}""" : """{"ok":true}""";
+            await WriteAsync(stream, 200, body, "application/json");
+            return;
+        }
+
         await WriteAsync(stream, 404, """{"error":"not found"}""", "application/json");
     }
 
-    private static async Task WriteAsync(Stream stream, int status, string body, string contentType)
+    private int CountRequest(string path)
+    {
+        lock (_requestCounts)
+        {
+            _requestCounts.TryGetValue(path, out var count);
+            count++;
+            _requestCounts[path] = count;
+            return count;
+        }
+    }
+
+    private static async Task WriteAsync(Stream stream, int status, string body, string contentType, Dictionary<string, string>? headers = null)
     {
         var bytes = Encoding.UTF8.GetBytes(body);
-        var reason = status == 200 ? "OK" : "Not Found";
+        var reason = status switch
+        {
+            200 => "OK",
+            429 => "Too Many Requests",
+            _ => "Not Found"
+        };
+        var extraHeaders = headers is null || headers.Count == 0
+            ? ""
+            : string.Concat(headers.Select(header => $"{header.Key}: {header.Value}\r\n"));
         var header = Encoding.ASCII.GetBytes(
-            $"HTTP/1.1 {status} {reason}\r\nContent-Type: {contentType}\r\nContent-Length: {bytes.Length}\r\nConnection: close\r\n\r\n");
+            $"HTTP/1.1 {status} {reason}\r\nContent-Type: {contentType}\r\n{extraHeaders}Content-Length: {bytes.Length}\r\nConnection: close\r\n\r\n");
         await stream.WriteAsync(header);
         await stream.WriteAsync(bytes);
     }

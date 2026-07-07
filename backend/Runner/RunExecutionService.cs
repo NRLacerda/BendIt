@@ -49,6 +49,7 @@ public sealed class RunExecutionService(
             run.ResultCount = results.Results.Count;
             run.FindingCount = results.Results.Count(result => result.Interesting);
             await store.SaveResultsAsync(projectId, results, cancellationToken);
+            await store.SaveRunResultsAsync(projectId, run.RunId, results, cancellationToken);
 
             await UpdateAsync("results", "running", 82);
             await UpdateAsync("analysis", "running", 95);

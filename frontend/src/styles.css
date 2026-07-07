@@ -84,21 +84,26 @@ h2 { font-size: 16px; }
 .toolbar { justify-content: space-between; margin-bottom: 16px; }
 .section-head { justify-content: space-between; margin-bottom: 16px; }
 .section-title-row { display: flex; align-items: center; gap: 10px; }
-.selected-project-spot {
+.breadcrumbs {
   display: inline-flex;
   flex-wrap: wrap;
   align-items: center;
-  gap: 8px;
-  margin-top: 10px;
-  padding: 8px 12px;
-  border: 1px solid var(--line);
-  border-radius: 999px;
-  background: var(--panel);
+  gap: 7px;
+  margin-bottom: 10px;
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 700;
 }
-.selected-project-spot span { color: var(--muted); font-size: 12px; text-transform: uppercase; letter-spacing: 0; }
-.selected-project-spot strong { color: var(--ink); font-size: 14px; }
-.selected-project-spot em { font-style: normal; color: var(--accent); font-size: 12px; }
-.selected-project-spot strong { font-size: 16px; }
+.breadcrumbs button {
+  min-height: 0;
+  border: 0;
+  background: transparent;
+  color: var(--accent);
+  padding: 0;
+  font-size: 12px;
+  font-weight: 800;
+}
+.breadcrumbs strong { color: var(--ink); }
 
 .notice, .toast { border: 1px solid var(--line); border-radius: 8px; background: var(--panel); padding: 12px 14px; font-weight: 700; }
 .notice { margin-bottom: 16px; }
@@ -111,7 +116,15 @@ h2 { font-size: 16px; }
 .projects-layout { display: grid; gap: 18px; grid-template-columns: minmax(360px, .95fr) minmax(0, 1.05fr); }
 .split-layout, .tests-layout { grid-template-columns: minmax(0, 1.1fr) minmax(360px, .9fr); }
 .results-layout { grid-template-columns: minmax(0, 1.2fr) minmax(360px, .8fr); }
-.project-form-page { display: grid; gap: 16px; }
+.project-form-page, .project-runs-page { display: grid; gap: 16px; }
+.project-summary {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 18px;
+}
+.project-summary p { margin-top: 6px; color: var(--muted); }
+.project-summary-actions { display: flex; align-items: center; gap: 10px; }
 .surface, .table-shell, .run-log, .result-detail { border: 1px solid var(--line); border-radius: 8px; background: var(--panel); box-shadow: var(--shadow); }
 .surface, .run-log, .result-detail { padding: 18px; }
 .run-log { margin-top: 18px; }
@@ -562,6 +575,11 @@ pre { overflow: auto; border: 1px solid var(--line); border-radius: 6px; backgro
 .row-action-cell button { min-height: 30px; padding: 0 10px; }
 .project-row-actions { display: flex; align-items: center; justify-content: flex-end; gap: 8px; }
 .icon-button { min-width: 84px; }
+.icon-only-button {
+  width: 34px;
+  min-width: 34px;
+  padding: 0;
+}
 
 @media (max-width: 980px) {
   .app-shell { grid-template-columns: 1fr; }
@@ -570,7 +588,7 @@ pre { overflow: auto; border: 1px solid var(--line); border-radius: 6px; backgro
   .split-layout, .tests-layout, .results-layout, .form-grid { grid-template-columns: 1fr; }
   .execution-grid { grid-template-columns: 1fr; }
   .projects-layout { grid-template-columns: 1fr; }
-  .run-command, .run-submit, .execution-hero, .execution-actions { align-items: stretch; flex-direction: column; }
+  .run-command, .run-submit, .execution-hero, .execution-actions, .project-summary { align-items: stretch; flex-direction: column; }
   .run-command-actions, .execution-progress { min-width: 0; width: 100%; justify-items: stretch; }
   .metrics-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .metrics-grid.discovery-metrics, .results-overview, .breakdown-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
@@ -581,8 +599,8 @@ pre { overflow: auto; border: 1px solid var(--line); border-radius: 6px; backgro
 @media (max-width: 640px) {
   .main { padding: 16px; }
   .topbar, .toolbar { align-items: stretch; flex-direction: column; }
-  .topbar-actions, .toolbar-group, .file-row, .battery-actions, .attach-row, .pagination-bar, .pagination-controls, .project-row-actions, .page-actions { width: 100%; grid-template-columns: 1fr; }
-  .topbar-actions button, .toolbar-group button, .toolbar-group input, .toolbar-group select, .battery-actions button, .attach-button, .pagination-controls button, .pagination-controls select, .project-row-actions button, .page-actions button { flex: 1; width: 100%; }
-  .pagination-bar, .pagination-controls, .project-row-actions, .page-actions { align-items: stretch; flex-direction: column; }
+  .topbar-actions, .toolbar-group, .file-row, .battery-actions, .attach-row, .pagination-bar, .pagination-controls, .project-row-actions, .page-actions, .project-summary-actions { width: 100%; grid-template-columns: 1fr; }
+  .topbar-actions button, .toolbar-group button, .toolbar-group input, .toolbar-group select, .battery-actions button, .attach-button, .pagination-controls button, .pagination-controls select, .project-row-actions button, .page-actions button, .project-summary-actions button { flex: 1; width: 100%; }
+  .pagination-bar, .pagination-controls, .project-row-actions, .page-actions, .project-summary-actions { align-items: stretch; flex-direction: column; }
   .nav-list, .metrics-grid, .metrics-grid.discovery-metrics, .results-overview, .breakdown-grid, .target-type-control, .test-grid, .test-list, .execution-metrics { grid-template-columns: 1fr; }
 }

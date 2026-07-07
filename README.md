@@ -26,7 +26,14 @@ Use BendIt only against systems you own or are explicitly authorized to test. So
 - Native API list from `backend/Resources/api-list.txt`.
 - Custom API list file attachment from the dashboard.
 - Real HTTP test execution with verb-aware test routing and bounded response capture.
+- OWASP-mapped test results with per-result remediation guidance.
+- Security header validation for common API8 hardening gaps.
+- Authentication boundary probes for missing or malformed credentials without storing raw secrets.
+- BOLA/IDOR identifier mutation across path placeholders, numeric/UUID segments, and identifier-like query parameters.
+- API inventory exposure detection for live legacy, versioned, internal, debug, documentation, and operational routes.
+- Sensitive data exposure detection that reports data classes without copying detected secret values into evidence.
 - Per-project local JSON artifacts under `bend-results/`.
+- Project run history with per-run result download and drill-down views.
 - Results view grouped by endpoint, with per-endpoint health coverage and drill-down test evidence.
 - Project list driven workflow with a dedicated execution page, live progress stepper, and auto-refresh for stored artifacts.
 
@@ -119,10 +126,11 @@ Within the **Test Battery** phase, the process runs as follows:
 2. **Verb-Aware Job Generation**: For every target endpoint, BendIt creates only the selected jobs that apply to the endpoint method.
    - `GET`, `HEAD`, and `OPTIONS` receive reachability/auth/path-oriented checks such as `authConsistency`, `jwtAnalysis`, `idMutation`, `httpMethodValidation`, and response comparison checks.
    - `POST`, `PUT`, and `PATCH` can also receive body-oriented checks such as `payloadValidation`, `requestSize`, `fieldSize`, `massAssignment`, and `contentTypeValidation`.
+   - Response-only checks such as `securityHeaders`, `inventoryExposure`, and `sensitiveDataExposure` use the normal bounded request/response evidence path and do not mutate application state.
    - Body-oriented checks are skipped for `GET`, `HEAD`, and `OPTIONS`; BendIt does not pretend a GET body was tested.
-3. **Execution**: The HTTP client executes real requests against the target endpoint. `idMutation` changes path identifier placeholders to a different concrete value, while body checks send configured payload sizes.
+3. **Execution**: The HTTP client executes real requests against the target endpoint. `idMutation` changes path identifier placeholders, numeric/UUID path segments, or identifier-like query parameters to a different concrete value, while body checks send configured payload sizes.
 4. **Bounded Evidence Capture**: Response bodies are captured from the real API response, capped at 100 KB per test result, with a 5 second request timeout to avoid hanging or large-download traps.
-   - **Risk Scoring**: A risk value (0–10) is assigned based on response status changes.
+   - **Risk Scoring**: A risk value (0-10) is assigned based on response status, endpoint context, response headers, inventory signals, and sensitive data indicators.
 5. **Collection**: Results are gathered, evaluated for findings (risk >= 5), and persisted.
 
 #### Example Scenario
@@ -156,7 +164,9 @@ GET  /api/projects/{id}
 GET  /api/projects/{id}/endpoints
 POST /api/projects/{id}/run
 GET  /api/projects/{id}/runs/current
+GET  /api/projects/{id}/runs
 GET  /api/projects/{id}/runs/{runId}
+GET  /api/projects/{id}/runs/{runId}/results
 GET  /api/projects/{id}/results
 ```
 
@@ -173,6 +183,7 @@ bend-results/
     current-run.json
     runs/
       run-xxxxxxxxxxxx.json
+      run-xxxxxxxxxxxx-results.json
     reports/
 ```
 

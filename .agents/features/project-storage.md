@@ -23,6 +23,7 @@ Manages project configurations, current run steps, discovered endpoints, and tes
      - `results.json`: Execution results and findings.
      - `current-run.json`: Stores live pipeline progress statistics.
      - `runs/run-xxxxxxxxxxxx.json`: Historical execution statistics.
+     - `runs/run-xxxxxxxxxxxx-results.json`: Per-run execution results for historical read/download views.
    - Updates an existing `project.json` in place through the project edit endpoint, preserving the stored `createdAt` timestamp while refreshing `updatedAt`.
 4. **Path Template Normalization**:
    - Collapses paths to unified templates (replaces numeric and hex ID blocks with `{id}`) during write operations to avoid duplication.

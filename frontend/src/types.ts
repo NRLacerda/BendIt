@@ -68,6 +68,7 @@ export type TestResult = {
   result: {
     statusCode: number;
     statusText: string;
+    headersMasked?: Record<string, string>;
     contentType: string;
     bodySizeBytes: number;
     durationMs: number;
@@ -77,6 +78,8 @@ export type TestResult = {
   outcome: string;
   interesting: boolean;
   analysisSummary: string;
+  owaspCategory: string;
+  recommendation: string;
   risk: number;
   severity: string;
   confidence: number;

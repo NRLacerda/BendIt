@@ -103,6 +103,20 @@ public sealed partial class RunnerController(IProjectStore store, RunCoordinator
         }
     }
 
+    [HttpGet("projects/{projectId}/runs")]
+    public async Task<IActionResult> Runs(string projectId, CancellationToken cancellationToken)
+    {
+        try
+        {
+            var runs = await store.ListRunsAsync(projectId, cancellationToken);
+            return Ok(new { runs });
+        }
+        catch (FileNotFoundException ex)
+        {
+            return NotFound(new { error = ex.Message });
+        }
+    }
+
     [HttpGet("projects/{projectId}/runs/{runId}")]
     public async Task<IActionResult> Run(string projectId, string runId, CancellationToken cancellationToken)
     {
@@ -113,6 +127,19 @@ public sealed partial class RunnerController(IProjectStore store, RunCoordinator
         catch (FileNotFoundException)
         {
             return NotFound(new { error = "run not found" });
+        }
+    }
+
+    [HttpGet("projects/{projectId}/runs/{runId}/results")]
+    public async Task<IActionResult> RunResults(string projectId, string runId, CancellationToken cancellationToken)
+    {
+        try
+        {
+            return Ok(await store.LoadRunResultsAsync(projectId, runId, cancellationToken));
+        }
+        catch (FileNotFoundException)
+        {
+            return NotFound(new { error = "run results not found" });
         }
     }
 

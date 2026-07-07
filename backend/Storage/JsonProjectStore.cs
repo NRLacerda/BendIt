@@ -69,10 +69,46 @@ public sealed partial class JsonProjectStore : IProjectStore
         await WriteJsonAsync(ProjectFile(projectId, "results.json"), document, cancellationToken);
     }
 
+    public async Task SaveRunResultsAsync(string projectId, string runId, ResultsDocument document, CancellationToken cancellationToken)
+    {
+        if (!SafeId().IsMatch(runId))
+        {
+            throw new InvalidOperationException($"invalid runId {runId}");
+        }
+
+        await WriteJsonAsync(Path.Combine(ProjectDir(projectId), "runs", runId + "-results.json"), document, cancellationToken);
+    }
+
     public async Task<ResultsDocument> LoadResultsAsync(string projectId, CancellationToken cancellationToken)
     {
         var path = ProjectFile(projectId, "results.json");
         return File.Exists(path) ? await ReadJsonAsync<ResultsDocument>(path, cancellationToken) : new ResultsDocument();
+    }
+
+    public async Task<ResultsDocument> LoadRunResultsAsync(string projectId, string runId, CancellationToken cancellationToken)
+    {
+        if (!SafeId().IsMatch(runId))
+        {
+            throw new InvalidOperationException($"invalid runId {runId}");
+        }
+
+        var path = Path.Combine(ProjectDir(projectId), "runs", runId + "-results.json");
+        if (File.Exists(path))
+        {
+            return await ReadJsonAsync<ResultsDocument>(path, cancellationToken);
+        }
+
+        var currentRunPath = ProjectFile(projectId, "current-run.json");
+        if (File.Exists(currentRunPath))
+        {
+            var currentRun = await ReadJsonAsync<RunDocument>(currentRunPath, cancellationToken);
+            if (currentRun.RunId == runId)
+            {
+                return await LoadResultsAsync(projectId, cancellationToken);
+            }
+        }
+
+        return new ResultsDocument { ProjectId = projectId };
     }
 
     public async Task SaveRunAsync(string projectId, RunDocument document, CancellationToken cancellationToken)
@@ -129,6 +165,38 @@ public sealed partial class JsonProjectStore : IProjectStore
         {
             _runLock.Release();
         }
+    }
+
+    public async Task<IReadOnlyList<RunDocument>> ListRunsAsync(string projectId, CancellationToken cancellationToken)
+    {
+        var dir = Path.Combine(ProjectDir(projectId), "runs");
+        if (!Directory.Exists(dir))
+        {
+            return [];
+        }
+
+        var runs = new List<RunDocument>();
+        foreach (var file in Directory.EnumerateFiles(dir, "run-*.json"))
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            if (file.EndsWith("-results.json", StringComparison.OrdinalIgnoreCase))
+            {
+                continue;
+            }
+
+            try
+            {
+                runs.Add(await ReadJsonAsync<RunDocument>(file, cancellationToken));
+            }
+            catch (Exception) when (!cancellationToken.IsCancellationRequested)
+            {
+                // Ignore malformed historical run files.
+            }
+        }
+
+        return runs
+            .OrderByDescending(run => run.StartedAt)
+            .ToList();
     }
 
     private string ProjectFile(string projectId, string name) => Path.Combine(ProjectDir(projectId), name);
