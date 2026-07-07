@@ -1,45 +1,40 @@
 # Rate Limit Validator
 
-Checks whether a target endpoint has observable throttling controls without running an unsafe load test.
+Runs a bounded rate-limit audit against a selected endpoint by sending real requests in a controlled sequence and evaluating throttling behavior.
 
 ## Inputs
 
-- **Endpoint** (`Endpoint`): Method, host, port, path, and query metadata from discovery.
-- **Project Headers/Auth** (`Project`): Request headers and masked auth context used by other test battery requests.
-- **Test Settings** (`TestRunRequest`):
-  - `bendTypes`: Includes `rateLimit`.
-  - `maxRequestsPerEndpoint`: Optional burst request count. Defaults to `5`, has a minimum of `2`, and is hard-capped at `10`.
+- **Discovered Endpoint** (`Endpoint`): A testable endpoint selected by the test battery.
+- **Project Config** (`Project`): Base request headers and masked authentication context.
+- **Test Request Settings** (`TestRunRequest`):
+  - `bendTypes`: Must include `rateLimit`.
+  - `maxRequestsPerEndpoint`: Optional burst size. Defaults to 5, clamps to a minimum of 2 and a maximum of 10.
 
 ## Processing
 
-1. Sends one baseline request and captures status, headers, content type, bounded body, and body size.
-2. Sends the burst with bounded parallelism:
-   - Burst request count is capped at `10`.
-   - Burst concurrency defaults to `3` and is hard-capped at `3`.
-   - Requests use the same endpoint URL, project headers, auth behavior, timeout, and bounded response capture as normal test battery requests.
-3. Sends one post-burst comparison request after every burst request completes.
-4. Detects throttling and degradation:
-   - Looks for HTTP `429` across baseline, burst, and post-burst responses.
-   - Looks for throttling headers: `Retry-After`, `RateLimit`, `RateLimit-Limit`, `RateLimit-Remaining`, `RateLimit-Reset`, and `X-RateLimit-*`.
-   - Compares baseline and post-burst status, content type, body hash, body size class, and throttling-header state.
+1. **Request Sequence**:
+   - Sends one baseline request to the concrete endpoint URL.
+   - Sends the sequential burst using the clamped burst size.
+   - Sends one post-burst comparison request.
+   - Uses the same bounded response capture, timeout, project headers, and auth handling as normal test execution.
+2. **Throttle Detection**:
+   - Records whether any baseline, burst, or post-burst response returned HTTP `429`.
+   - Records common throttling headers: `Retry-After`, `RateLimit`, `RateLimit-Limit`, `RateLimit-Remaining`, `RateLimit-Reset`, and `X-RateLimit-*`.
+3. **Degradation Detection**:
+   - Compares baseline and post-burst response status, content type, body size class, body hash, and throttling-header state.
+   - Marks degraded behavior when any comparison signal changes.
+4. **Risk Evaluation**:
+   - Low risk when HTTP `429`, throttling headers, and stable post-burst behavior are observed.
+   - Medium risk when no `429` is observed, throttling headers are missing, any request fails, or post-burst behavior degrades.
 
 ## Outputs
 
-- Emits one `TestResult` with `bendType = rateLimit`.
-- Stores the post-burst response in the normal `result` and `resultBody` fields.
-- Stores structured burst evidence in `mutation`, including:
-  - `burstRequests`
-  - `burstConcurrency`
-  - `burstStatuses`
-  - `saw429`
-  - `sawThrottlingHeaders`
-  - `throttlingHeaders`
-  - `degradedAfterBurst`
-  - `degradationSignals`
-- Evidence summarizes the baseline/burst/post-burst sequence, statuses, missing throttling signals, throttling headers, and any degraded post-burst behavior.
+- **Test Result** (`TestResult`): Uses the existing result schema with the post-burst response in `result` and `resultBody`.
+- **Mutation Metadata**: Stores `type=controlledRateLimitBurst`, baseline status, burst count, burst statuses, post-burst status, `saw429`, `sawThrottlingHeaders`, throttling header names, `degradedAfterBurst`, and degradation signals.
+- **Evidence**: Summarizes request count, observed statuses, missing `429`, missing headers, and any post-burst degradation.
 
-## Risk Behavior
+## Safety
 
-- Low risk when throttling controls are observed and the post-burst response matches the baseline.
-- Medium risk when no HTTP `429` is observed, no throttling headers are observed, any request fails, or the post-burst response differs from the baseline.
-- Maps to `API4: Unrestricted Resource Consumption`.
+- Burst requests are sequential, not parallel.
+- Burst size is capped at 10 even when the request asks for a larger value.
+- The validator remains opt-in through `bendTypes` and does not run as part of the default bend type list.

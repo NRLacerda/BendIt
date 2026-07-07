@@ -11,8 +11,6 @@ public sealed class TestBatteryRunner
     private const int MaxResultBodyBytes = 100 * 1024;
     private const int DefaultRateLimitBurstRequests = 5;
     private const int MaxRateLimitBurstRequests = 10;
-    private const int DefaultRateLimitBurstConcurrency = 3;
-    private const int MaxRateLimitBurstConcurrency = 3;
     private static readonly TimeSpan RequestTimeout = TimeSpan.FromSeconds(5);
     private static readonly string[] DefaultBendTypes =
     [
@@ -144,11 +142,16 @@ public sealed class TestBatteryRunner
     {
         var url = EndpointUrl(endpoint, "rateLimit");
         var burstCount = RateLimitBurstCount(testRequest);
-        var burstConcurrency = RateLimitBurstConcurrency(burstCount);
         var baseline = await ExecuteAsync(client, endpoint.Method, url, null, project, "rateLimit", cancellationToken);
-        var burst = await ExecuteRateLimitBurstAsync(client, project, endpoint, url, burstCount, burstConcurrency, cancellationToken);
+        var burst = new List<ExecutedRequest>(burstCount);
+        for (var i = 0; i < burstCount; i++)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            burst.Add(await ExecuteAsync(client, endpoint.Method, url, null, project, "rateLimit", cancellationToken));
+        }
+
         var postBurst = await ExecuteAsync(client, endpoint.Method, url, null, project, "rateLimit", cancellationToken);
-        var observation = RateLimitObservation.From(baseline, burst, postBurst, burstCount, burstConcurrency);
+        var observation = RateLimitObservation.From(baseline, burst, postBurst, burstCount);
         var risk = RateLimitRisk(observation);
         var outcome = OutcomeFor("rateLimit", postBurst.StatusCode, risk);
         var interesting = IsInteresting("rateLimit", postBurst.StatusCode, risk);
@@ -290,39 +293,6 @@ public sealed class TestBatteryRunner
             ? request.MaxRequestsPerEndpoint
             : DefaultRateLimitBurstRequests;
         return Math.Clamp(requested, 2, MaxRateLimitBurstRequests);
-    }
-
-    private static int RateLimitBurstConcurrency(int burstCount)
-    {
-        return Math.Clamp(Math.Min(DefaultRateLimitBurstConcurrency, burstCount), 1, MaxRateLimitBurstConcurrency);
-    }
-
-    private static async Task<List<ExecutedRequest>> ExecuteRateLimitBurstAsync(
-        HttpClient client,
-        Project project,
-        EndpointModel endpoint,
-        string url,
-        int burstCount,
-        int burstConcurrency,
-        CancellationToken cancellationToken)
-    {
-        using var gate = new SemaphoreSlim(burstConcurrency, burstConcurrency);
-        var burst = new ExecutedRequest[burstCount];
-        var tasks = Enumerable.Range(0, burstCount).Select(async index =>
-        {
-            await gate.WaitAsync(cancellationToken);
-            try
-            {
-                burst[index] = await ExecuteAsync(client, endpoint.Method, url, null, project, "rateLimit", cancellationToken);
-            }
-            finally
-            {
-                gate.Release();
-            }
-        });
-
-        await Task.WhenAll(tasks);
-        return burst.ToList();
     }
 
     private static string JsonPayload(string fieldName, int sizeKb)
@@ -547,7 +517,6 @@ public sealed class TestBatteryRunner
             ["type"] = "controlledRateLimitBurst",
             ["baselineStatus"] = observation.Baseline.StatusCode,
             ["burstRequests"] = observation.BurstRequests,
-            ["burstConcurrency"] = observation.BurstConcurrency,
             ["burstStatuses"] = observation.BurstStatusCodes,
             ["postBurstStatus"] = observation.PostBurst.StatusCode,
             ["saw429"] = observation.SawTooManyRequests,
@@ -589,7 +558,7 @@ public sealed class TestBatteryRunner
             ? "post-burst response differed from baseline: " + string.Join(", ", observation.DegradationSignals)
             : "post-burst response matched the baseline");
 
-        return $"{endpoint.Method} {endpoint.Path} sent baseline, {observation.BurstRequests} burst request(s) with concurrency {observation.BurstConcurrency}, and post-burst comparison; statuses: {string.Join(", ", observation.StatusCodes)}; {string.Join("; ", findings)}.";
+        return $"{endpoint.Method} {endpoint.Path} sent baseline, {observation.BurstRequests} burst request(s), and post-burst comparison; statuses: {string.Join(", ", observation.StatusCodes)}; {string.Join("; ", findings)}.";
     }
 
     private static string RateLimitAnalysisSummary(int risk, RateLimitObservation observation)
@@ -1001,7 +970,6 @@ public sealed class TestBatteryRunner
         public required List<ExecutedRequest> Burst { get; init; }
         public required ExecutedRequest PostBurst { get; init; }
         public required int BurstRequests { get; init; }
-        public required int BurstConcurrency { get; init; }
         public required List<string> DegradationSignals { get; init; }
         public required List<string> ThrottlingHeaderNames { get; init; }
         public List<ExecutedRequest> AllRequests => [Baseline, .. Burst, PostBurst];
@@ -1012,7 +980,7 @@ public sealed class TestBatteryRunner
         public bool DegradedAfterBurst => DegradationSignals.Count > 0;
         public bool AnyRequestFailed => AllRequests.Any(request => !string.IsNullOrEmpty(request.Error));
 
-        public static RateLimitObservation From(ExecutedRequest baseline, List<ExecutedRequest> burst, ExecutedRequest postBurst, int burstRequests, int burstConcurrency)
+        public static RateLimitObservation From(ExecutedRequest baseline, List<ExecutedRequest> burst, ExecutedRequest postBurst, int burstRequests)
         {
             var throttlingHeaders = new List<string>();
             foreach (var request in new[] { baseline }.Concat(burst).Append(postBurst))
@@ -1034,7 +1002,6 @@ public sealed class TestBatteryRunner
                 Burst = burst,
                 PostBurst = postBurst,
                 BurstRequests = burstRequests,
-                BurstConcurrency = burstConcurrency,
                 DegradationSignals = DegradationSignals(baseline, postBurst),
                 ThrottlingHeaderNames = throttlingHeaders
             };

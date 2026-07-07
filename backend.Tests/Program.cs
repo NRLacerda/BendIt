@@ -672,10 +672,6 @@ static async Task RateLimitValidatorCapsRequestedBurstSize()
         throw new InvalidOperationException("expected rateLimit burstRequests mutation value to be capped at 10");
     }
 
-    if (!result.Mutation.TryGetValue("burstConcurrency", out var burstConcurrency) || Convert.ToInt32(burstConcurrency) != 3)
-    {
-        throw new InvalidOperationException("expected rateLimit burstConcurrency mutation value to be capped at 3");
-    }
 }
 
 static void AssertContains(IEnumerable<string> lines, string expected)
