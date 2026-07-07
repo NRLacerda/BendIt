@@ -111,6 +111,7 @@ h2 { font-size: 16px; }
 .projects-layout { display: grid; gap: 18px; grid-template-columns: minmax(360px, .95fr) minmax(0, 1.05fr); }
 .split-layout, .tests-layout { grid-template-columns: minmax(0, 1.1fr) minmax(360px, .9fr); }
 .results-layout { grid-template-columns: minmax(0, 1.2fr) minmax(360px, .8fr); }
+.project-form-page { display: grid; gap: 16px; }
 .surface, .table-shell, .run-log, .result-detail { border: 1px solid var(--line); border-radius: 8px; background: var(--panel); box-shadow: var(--shadow); }
 .surface, .run-log, .result-detail { padding: 18px; }
 .run-log { margin-top: 18px; }
@@ -161,6 +162,121 @@ input:focus, select:focus, textarea:focus, button:focus-visible, .select-trigger
 .run-dashboard {
   display: grid;
   gap: 18px;
+}
+
+.execution-page {
+  display: grid;
+  gap: 18px;
+}
+
+.execution-hero {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 18px;
+}
+
+.execution-hero p,
+.execution-actions p {
+  margin-top: 6px;
+  color: var(--muted);
+}
+
+.execution-progress {
+  min-width: 320px;
+  display: grid;
+  gap: 8px;
+  justify-items: end;
+}
+
+.execution-progress strong {
+  font-size: 34px;
+  line-height: 1;
+}
+
+.execution-progress span {
+  color: var(--muted);
+  font-size: 13px;
+  font-weight: 700;
+}
+
+.execution-grid {
+  display: grid;
+  grid-template-columns: minmax(320px, .85fr) minmax(0, 1.15fr);
+  gap: 18px;
+}
+
+.run-step-list {
+  display: grid;
+  gap: 10px;
+}
+
+.run-step-item {
+  display: grid;
+  grid-template-columns: 34px 1fr;
+  align-items: center;
+  gap: 10px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--panel-strong);
+  padding: 10px;
+}
+
+.run-step-item > span {
+  width: 30px;
+  height: 30px;
+  display: grid;
+  place-items: center;
+  border-radius: 999px;
+  background: var(--panel-muted);
+  color: var(--muted);
+  font-weight: 800;
+}
+
+.run-step-item strong,
+.run-step-item em {
+  display: block;
+}
+
+.run-step-item em {
+  margin-top: 2px;
+  color: var(--muted);
+  font-size: 12px;
+  font-style: normal;
+}
+
+.run-step-item.active {
+  border-color: color-mix(in srgb, var(--accent) 50%, var(--line));
+}
+
+.run-step-item.active > span {
+  background: color-mix(in srgb, var(--accent) 18%, var(--panel));
+  color: var(--accent);
+}
+
+.run-step-item.done > span {
+  background: color-mix(in srgb, var(--good) 18%, var(--panel));
+  color: var(--good);
+}
+
+.execution-metrics {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 10px;
+  margin-bottom: 14px;
+}
+
+.execution-actions {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 18px;
+}
+
+.danger-strip {
+  border-color: color-mix(in srgb, var(--danger) 65%, var(--line));
+  background: color-mix(in srgb, var(--danger) 12%, var(--panel));
+  color: var(--danger);
 }
 
 .run-command {
@@ -441,29 +557,32 @@ pre { overflow: auto; border: 1px solid var(--line); border-radius: 6px; backgro
 .dialog-title-row { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 12px; }
 .dialog-close { min-width: 36px; padding: 0; }
 .dialog-actions { display: flex; justify-content: flex-end; gap: 10px; margin-top: 20px; }
-.project-editor-dialog { width: min(980px, calc(100vw - 32px)); z-index: 991; }
-.project-editor-actions { margin-top: 14px; }
+.page-actions { display: flex; justify-content: flex-end; gap: 10px; }
 .row-action-cell { width: 1%; }
 .row-action-cell button { min-height: 30px; padding: 0 10px; }
+.project-row-actions { display: flex; align-items: center; justify-content: flex-end; gap: 8px; }
+.icon-button { min-width: 84px; }
 
 @media (max-width: 980px) {
   .app-shell { grid-template-columns: 1fr; }
   .sidebar { position: static; height: auto; }
   .nav-list { grid-template-columns: repeat(5, minmax(0, 1fr)); }
   .split-layout, .tests-layout, .results-layout, .form-grid { grid-template-columns: 1fr; }
+  .execution-grid { grid-template-columns: 1fr; }
   .projects-layout { grid-template-columns: 1fr; }
-  .run-command, .run-submit { align-items: stretch; flex-direction: column; }
-  .run-command-actions { min-width: 0; width: 100%; justify-items: stretch; }
+  .run-command, .run-submit, .execution-hero, .execution-actions { align-items: stretch; flex-direction: column; }
+  .run-command-actions, .execution-progress { min-width: 0; width: 100%; justify-items: stretch; }
   .metrics-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .metrics-grid.discovery-metrics, .results-overview, .breakdown-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .execution-metrics { grid-template-columns: repeat(3, minmax(0, 1fr)); }
   .coverage-layout { grid-template-columns: 1fr; }
 }
 
 @media (max-width: 640px) {
   .main { padding: 16px; }
   .topbar, .toolbar { align-items: stretch; flex-direction: column; }
-  .topbar-actions, .toolbar-group, .file-row, .battery-actions, .attach-row, .pagination-bar, .pagination-controls { width: 100%; grid-template-columns: 1fr; }
-  .topbar-actions button, .toolbar-group button, .toolbar-group input, .toolbar-group select, .battery-actions button, .attach-button, .pagination-controls button, .pagination-controls select { flex: 1; width: 100%; }
-  .pagination-bar, .pagination-controls { align-items: stretch; flex-direction: column; }
-  .nav-list, .metrics-grid, .metrics-grid.discovery-metrics, .results-overview, .breakdown-grid, .target-type-control, .test-grid, .test-list { grid-template-columns: 1fr; }
+  .topbar-actions, .toolbar-group, .file-row, .battery-actions, .attach-row, .pagination-bar, .pagination-controls, .project-row-actions, .page-actions { width: 100%; grid-template-columns: 1fr; }
+  .topbar-actions button, .toolbar-group button, .toolbar-group input, .toolbar-group select, .battery-actions button, .attach-button, .pagination-controls button, .pagination-controls select, .project-row-actions button, .page-actions button { flex: 1; width: 100%; }
+  .pagination-bar, .pagination-controls, .project-row-actions, .page-actions { align-items: stretch; flex-direction: column; }
+  .nav-list, .metrics-grid, .metrics-grid.discovery-metrics, .results-overview, .breakdown-grid, .target-type-control, .test-grid, .test-list, .execution-metrics { grid-template-columns: 1fr; }
 }

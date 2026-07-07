@@ -1,7 +1,6 @@
 import React, { useEffect, useMemo, useState } from "react";
 import { createRoot } from "react-dom/client";
-import * as Dialog from "@radix-ui/react-dialog";
-import { Activity, AlertTriangle, Download, FilePlus2, Globe2, Moon, Play, RefreshCw, Search, Server, Sun, X } from "lucide-react";
+import { Activity, AlertTriangle, Download, FilePlus2, Globe2, Moon, Play, RefreshCw, Search, Server, Sun } from "lucide-react";
 import { Cell, Pie, PieChart, ResponsiveContainer, Tooltip } from "recharts";
 import { api } from "./api";
 import logoUrl from "./assets/bendit-logo1.png";
@@ -21,7 +20,7 @@ import {
 } from "./utils";
 import "./styles.css";
 
-type View = "run" | "projects" | "results";
+type View = "projects" | "projectForm" | "run" | "execution" | "results";
 type Theme = "dark" | "light";
 
 const bendTypes = [
@@ -47,7 +46,7 @@ const defaultBendTypes = bendTypes.filter((_, index) => index < 8 || index === 1
 
 function App() {
   const [theme, setTheme] = useState<Theme>(() => (localStorage.getItem("bendit.theme") as Theme) || "dark");
-  const [view, setView] = useState<View>("run");
+  const [view, setView] = useState<View>("projects");
   const [projects, setProjects] = useState<Project[]>([]);
   const [project, setProject] = useState<Project>(() => newProjectTemplate());
   const [endpoints, setEndpoints] = useState<Endpoint[]>([]);
@@ -55,6 +54,7 @@ function App() {
   const [notice, setNotice] = useState<Notice>(null);
   const [runState, setRunState] = useState("Idle");
   const [progress, setProgress] = useState(0);
+  const [currentRun, setCurrentRun] = useState<RunDocument | null>(null);
   const [projectSearch, setProjectSearch] = useState("");
   const [endpointSearch, setEndpointSearch] = useState("");
   const [resultSearch, setResultSearch] = useState("");
@@ -63,7 +63,6 @@ function App() {
   const [resultMode, setResultMode] = useState<"findings" | "raw">("findings");
   const [selectedResult, setSelectedResult] = useState<TestResult | null>(null);
   const [confirmOpen, setConfirmOpen] = useState(false);
-  const [projectEditorOpen, setProjectEditorOpen] = useState(false);
   const [projectEditorMode, setProjectEditorMode] = useState<"create" | "edit">("create");
   const [projectEditorId, setProjectEditorId] = useState<string | null>(null);
 
@@ -131,6 +130,7 @@ function App() {
     const modeMatch = resultMode === "raw" || result.interesting;
     return modeMatch && (resultType === "all" || result.bendType === resultType) && riskMatch && (!resultSearch || haystack.includes(resultSearch.toLowerCase()));
   });
+  const runActive = currentRun?.status === "queued" || currentRun?.status === "running";
 
   async function loadProjects() {
     try {
@@ -150,6 +150,21 @@ function App() {
       setHeaders("");
       await refreshArtifacts(loaded.projectId, true);
       info(`Selected project ${loaded.projectId}`);
+    } catch (error) {
+      fail(error);
+    }
+  }
+
+  async function runProject(projectId: string) {
+    try {
+      const loaded = await api.getProject(projectId);
+      setProject(loaded);
+      setAuthType(loaded.auth.type);
+      setJwt("");
+      setCookie("");
+      setHeaders("");
+      await refreshArtifacts(loaded.projectId, true);
+      info(`Ready to run ${loaded.projectId}`);
       setView("run");
     } catch (error) {
       fail(error);
@@ -188,7 +203,6 @@ function App() {
         : await api.saveProject(draft);
       setProject(saved);
       setProjects(await api.listProjects());
-      setProjectEditorOpen(false);
       success(`Saved project ${saved.projectId} to ${saved.outputDir}`);
       setView("projects");
     } catch (error) {
@@ -197,10 +211,20 @@ function App() {
   }
 
   async function startPipeline() {
+    if (runActive) {
+      setConfirmOpen(false);
+      setView("execution");
+      info("A run is already active for this project");
+      return;
+    }
+
+    let runStarted = false;
     try {
       setConfirmOpen(false);
       setRunState("Saving project");
       setProgress(5);
+      setCurrentRun(null);
+      setView("execution");
       const saved = await saveProjectWithoutRedirect();
 
       const started = await api.startRun(saved.projectId, {
@@ -219,6 +243,8 @@ function App() {
         }
       });
       applyRunState(started);
+      setCurrentRun(started);
+      runStarted = true;
       info(`Started run ${started.runId}`);
 
       const completed = await pollRun(saved.projectId);
@@ -232,11 +258,14 @@ function App() {
       setResultMode("findings");
       setRunState("Idle");
       setProgress(100);
+      setCurrentRun(completed);
       success(`Pipeline completed: ${completed.endpointCount} endpoints, ${completed.findingCount} findings, ${completed.resultCount} raw results`);
       setView("results");
     } catch (error) {
-      setRunState("Idle");
-      setProgress(0);
+      setRunState(runStarted ? "Failed" : "Idle");
+      if (!runStarted) {
+        setProgress(0);
+      }
       if (project.projectId) {
         try {
           await refreshArtifacts(project.projectId, false);
@@ -252,6 +281,7 @@ function App() {
     for (;;) {
       const current = await api.getCurrentRun(projectId);
       applyRunState(current);
+      setCurrentRun(current);
       if (current.status === "completed") return current;
       if (current.status === "failed") throw new Error(current.error || "Run failed");
       await delay(2000);
@@ -265,7 +295,10 @@ function App() {
 
   async function saveProjectWithoutRedirect() {
     const draft = buildProjectDraft(project);
-    const saved = await api.saveProject(draft);
+    const projectExists = projects.some((item) => item.projectId === project.projectId);
+    const saved = projectExists
+      ? await api.updateProject(project.projectId, draft)
+      : await api.saveProject(draft);
     setProject(saved);
     setProjects(await api.listProjects());
     return saved;
@@ -293,6 +326,9 @@ function App() {
 
   function newProject() {
     setProject(newProjectTemplate());
+    setEndpoints([]);
+    setResults([]);
+    setSelectedResult(null);
     setAuthType("jwt");
     setJwt("");
     setCookie("");
@@ -301,7 +337,7 @@ function App() {
     setApiListFileName("");
     setProjectEditorMode("create");
     setProjectEditorId(null);
-    setProjectEditorOpen(true);
+    setView("projectForm");
   }
 
   function editProject(target: Project) {
@@ -314,7 +350,7 @@ function App() {
     setApiListFileName("");
     setProjectEditorMode("edit");
     setProjectEditorId(target.projectId);
-    setProjectEditorOpen(true);
+    setView("projectForm");
   }
 
   function success(message: string) {
@@ -342,11 +378,10 @@ function App() {
         </div>
         <nav className="nav-list" aria-label="Primary">
           {[
-            ["run", "Run"],
             ["projects", "Projects"],
             ["results", "Results"]
           ].map(([key, label]) => (
-            <button className={`nav-item ${view === key ? "is-active" : ""}`} key={key} onClick={() => setView(key as View)}>
+            <button className={`nav-item ${(view === key || (key === "projects" && view === "projectForm")) ? "is-active" : ""}`} key={key} onClick={() => setView(key as View)}>
               {label}
             </button>
           ))}
@@ -389,7 +424,30 @@ function App() {
                 <TextInput value={projectSearch} onChange={(event) => setProjectSearch(event.target.value)} placeholder="Filter projects" />
               </div>
             </div>
-            <ProjectTable projects={filteredProjects} selectedId={project.projectId} onSelect={selectProject} onEdit={editProject} />
+            <ProjectTable projects={filteredProjects} selectedId={project.projectId} onSelect={selectProject} onEdit={editProject} onRun={runProject} />
+          </section>
+        )}
+        {view === "projectForm" && (
+          <section className="project-form-page">
+            <ProjectEditor
+              mode={projectEditorMode}
+              project={project}
+              setProject={setProject}
+              authType={authType}
+              setAuthType={setAuthType}
+              jwt={jwt}
+              setJwt={setJwt}
+              cookie={cookie}
+              setCookie={setCookie}
+              headers={headers}
+              setHeaders={setHeaders}
+            />
+            <div className="page-actions">
+              <Button onClick={() => setView("projects")}>Cancel</Button>
+              <Button className="primary-button" onClick={saveProject}>
+                {projectEditorMode === "edit" ? "Save changes" : "Create project"}
+              </Button>
+            </div>
           </section>
         )}
         {view === "run" && (
@@ -428,7 +486,18 @@ function App() {
             setExcludedPaths={setExcludedPaths}
             progress={progress}
             runState={runState}
+            isRunning={runActive}
             onStart={() => setConfirmOpen(true)}
+          />
+        )}
+        {view === "execution" && (
+          <ExecutionView
+            project={project}
+            run={currentRun}
+            progress={progress}
+            runState={runState}
+            onBackToRun={() => setView("run")}
+            onResults={() => setView("results")}
           />
         )}
         {view === "results" && (
@@ -450,50 +519,22 @@ function App() {
           />
         )}
       </main>
-      <Dialog.Root open={projectEditorOpen} onOpenChange={setProjectEditorOpen}>
-        <Dialog.Portal>
-          <Dialog.Overlay className="dialog-overlay" />
-          <Dialog.Content className="dialog-content project-editor-dialog">
-            <div className="dialog-title-row">
-              <Dialog.Title>{projectEditorMode === "edit" ? "Edit project" : "Create project"}</Dialog.Title>
-              <Dialog.Close className="dialog-close" aria-label="Close"><X size={18} /></Dialog.Close>
-            </div>
-            <ProjectEditor
-              mode={projectEditorMode}
-              project={project}
-              setProject={setProject}
-              authType={authType}
-              setAuthType={setAuthType}
-              jwt={jwt}
-              setJwt={setJwt}
-              cookie={cookie}
-              setCookie={setCookie}
-              headers={headers}
-              setHeaders={setHeaders}
-            />
-            <div className="dialog-actions project-editor-actions">
-              <Dialog.Close>Cancel</Dialog.Close>
-              <Button className="primary-button" onClick={saveProject}>
-                {projectEditorMode === "edit" ? "Save changes" : "Create project"}
-              </Button>
-            </div>
-          </Dialog.Content>
-        </Dialog.Portal>
-      </Dialog.Root>
       <ConfirmDialog open={confirmOpen} onOpenChange={setConfirmOpen} onConfirm={startPipeline} />
     </div>
   );
 }
 
 function viewTitle(view: View) {
-  return ({ run: "Run", projects: "Projects", results: "Results" })[view];
+  return ({ projects: "Projects", projectForm: "Project", run: "Run", execution: "Execution", results: "Results" })[view];
 }
 
 function viewMeta(view: View, project: Project) {
   const selected = project?.projectId ? `Selected: ${project.projectId}` : "No project selected";
   return ({
-    run: `${selected}. Configure the target, discover endpoints, and run the test battery.`,
     projects: "Select a project or create a target.",
+    projectForm: "Create or edit the target configuration. Saving returns to the project list.",
+    run: `${selected}. Configure discovery and the test battery for this project.`,
+    execution: `${selected}. Follow the active run as the backend writes progress.`,
     results: `${selected}. Inspect stored evidence and export results.`
   })[view];
 }
@@ -583,6 +624,108 @@ function endpointUrl(endpoint: Endpoint) {
   return `${endpoint.scheme}://${endpoint.host}${port}${endpoint.path}`;
 }
 
+function ExecutionView(props: {
+  project: Project;
+  run: RunDocument | null;
+  progress: number;
+  runState: string;
+  onBackToRun: () => void;
+  onResults: () => void;
+}) {
+  const status = props.run?.status || "queued";
+  const active = status === "queued" || status === "running";
+  const step = props.run?.currentStep || "api_specs";
+  const startedAt = props.run?.startedAt ? new Date(props.run.startedAt).toLocaleString() : "Starting";
+  const completedAt = props.run?.completedAt ? new Date(props.run.completedAt).toLocaleString() : "";
+
+  return (
+    <section className="execution-page">
+      <Stepper progress={props.progress} />
+
+      <section className={`surface execution-hero ${status}`}>
+        <div>
+          <div className="section-title-row">
+            <h2>{active ? "Run in progress" : status === "completed" ? "Run completed" : "Run failed"}</h2>
+            <span className={`pill ${status === "completed" ? "good" : status === "failed" ? "danger" : "warn"}`}>{status}</span>
+          </div>
+          <p>{props.project.name || props.project.projectId}</p>
+        </div>
+        <div className="execution-progress">
+          <strong>{props.progress}%</strong>
+          <div className="progress-track wide"><div className="progress-fill" style={{ width: `${props.progress}%` }} /></div>
+          <span>{props.runState}</span>
+        </div>
+      </section>
+
+      <div className="execution-grid">
+        <section className="surface">
+          <div className="section-head">
+            <h2>Pipeline state</h2>
+            <span className="muted-note">{props.run?.runId || "Allocating run id"}</span>
+          </div>
+          <div className="run-step-list">
+            {runStepItems(step, props.progress).map((item) => (
+              <div key={item.key} className={`run-step-item ${item.state}`}>
+                <span>{item.index}</span>
+                <div>
+                  <strong>{item.label}</strong>
+                  <em>{item.caption}</em>
+                </div>
+              </div>
+            ))}
+          </div>
+        </section>
+
+        <section className="surface">
+          <div className="section-head">
+            <h2>Live counters</h2>
+            <span className="muted-note">Updated from current-run.json</span>
+          </div>
+          <div className="execution-metrics">
+            <Metric label="Endpoints" value={props.run?.endpointCount || 0} />
+            <Metric label="Checks run" value={props.run?.resultCount || 0} />
+            <Metric label="Findings" value={props.run?.findingCount || 0} tone={(props.run?.findingCount || 0) > 0 ? "danger" : "default"} />
+          </div>
+          <div className="detail-grid no-margin">
+            <Detail label="Started" value={startedAt} />
+            <Detail label="Completed" value={completedAt || (active ? "Running" : "Not completed")} />
+            <Detail label="Current step" value={props.runState} />
+            <Detail label="Target" value={props.project.isWebPage ? "Web Page" : "WebAPI"} />
+          </div>
+          {props.run?.error && <div className="warning-strip danger-strip">{props.run.error}</div>}
+        </section>
+      </div>
+
+      <section className="surface execution-actions">
+        <div>
+          <h2>{active ? "Execution is locked" : "Execution finished"}</h2>
+          <p>{active ? "A project can only have one active run. The start action is disabled until this run finishes." : "Review results or adjust the configuration before starting another run."}</p>
+        </div>
+        <div className="toolbar-group">
+          <Button onClick={props.onBackToRun} disabled={active}>Back to config</Button>
+          <Button className="primary-button" onClick={props.onResults} disabled={active || status === "failed"}>Open results</Button>
+        </div>
+      </section>
+    </section>
+  );
+}
+
+function runStepItems(currentStep: RunDocument["currentStep"], progress: number) {
+  const steps: Array<{ key: RunDocument["currentStep"]; label: string; caption: string; threshold: number }> = [
+    { key: "api_specs", label: "API specs", caption: "Loading existing artifacts and probing specs", threshold: 20 },
+    { key: "discovery", label: "Discovery", caption: "Finding and verifying endpoints", threshold: 40 },
+    { key: "tests", label: "Test battery", caption: "Executing configured checks", threshold: 80 },
+    { key: "results", label: "Results", caption: "Persisting evidence", threshold: 90 },
+    { key: "analysis", label: "Analysis", caption: "Summarizing findings", threshold: 100 }
+  ];
+  const currentIndex = steps.findIndex((item) => item.key === currentStep);
+  return steps.map((item, index) => ({
+    ...item,
+    index: index + 1,
+    state: progress >= item.threshold ? "done" : index === currentIndex ? "active" : "pending"
+  }));
+}
+
 function RunView(props: {
   project: Project;
   setProject: (project: Project) => void;
@@ -618,6 +761,7 @@ function RunView(props: {
   setExcludedPaths: (value: string) => void;
   progress: number;
   runState: string;
+  isRunning: boolean;
   onStart: () => void;
 }) {
   const summary = summarizeEndpoints(props.endpoints);
@@ -737,7 +881,9 @@ function RunView(props: {
         </div>
         <div className="run-command-actions">
           <div className="run-state-value">{props.runState}</div>
-          <Button className="primary-button start-button" onClick={props.onStart}><Play size={18} /> Save & Start</Button>
+          <Button className="primary-button start-button" onClick={props.onStart} disabled={props.isRunning}>
+            <Play size={18} /> {props.isRunning ? "Running" : "Save & Start"}
+          </Button>
         </div>
       </section>
     </section>
@@ -769,11 +915,17 @@ function Stepper(props: { progress: number }) {
   );
 }
 
-function ProjectTable(props: { projects: Project[]; selectedId: string; onSelect: (id: string) => void; onEdit: (project: Project) => void }) {
+function ProjectTable(props: {
+  projects: Project[];
+  selectedId: string;
+  onSelect: (id: string) => void;
+  onEdit: (project: Project) => void;
+  onRun: (id: string) => void;
+}) {
   return (
     <div className="table-shell">
       <table>
-        <thead><tr><th>Project</th><th>Base URL</th><th>Target</th><th>Auth</th><th>Output</th><th>Updated</th><th /></tr></thead>
+        <thead><tr><th>Project</th><th>Base URL</th><th>Target</th><th>Auth</th><th>Output</th><th>Updated</th><th>Actions</th></tr></thead>
         <tbody>
           {props.projects.map((project) => (
             <tr key={project.projectId} className={props.selectedId === project.projectId ? "is-selected" : ""} onClick={() => props.onSelect(project.projectId)}>
@@ -783,7 +935,15 @@ function ProjectTable(props: { projects: Project[]; selectedId: string; onSelect
               <td><span className="pill">{project.auth?.type || "none"}</span></td>
               <td className="path-cell">{project.outputDir}</td>
               <td>{project.updatedAt || ""}</td>
-              <td className="row-action-cell"><Button onClick={(event) => { event.stopPropagation(); props.onEdit(project); }}>Edit</Button></td>
+              <td className="row-action-cell">
+                <div className="project-row-actions">
+                  <Button onClick={(event) => { event.stopPropagation(); props.onEdit(project); }}>Edit</Button>
+                  <Button className="primary-button icon-button" title={`Run ${project.name || project.projectId}`} onClick={(event) => { event.stopPropagation(); props.onRun(project.projectId); }}>
+                    <Play size={16} />
+                    <span>Run</span>
+                  </Button>
+                </div>
+              </td>
             </tr>
           ))}
         </tbody>

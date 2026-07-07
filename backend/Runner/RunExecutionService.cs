@@ -34,7 +34,18 @@ public sealed class RunExecutionService(
 
             await UpdateAsync("tests", "running", 55);
             var testableEndpoints = DiscoveryOrchestrator.FilterTestableEndpoints(endpoints.Endpoints);
-            var results = await testBatteryRunner.RunAsync(project, testableEndpoints, request.Tests, cancellationToken);
+            var results = await testBatteryRunner.RunAsync(
+                project,
+                testableEndpoints,
+                request.Tests,
+                async (completed, total, findings) =>
+                {
+                    run.ResultCount = completed;
+                    run.FindingCount = findings;
+                    run.Progress = total <= 0 ? 80 : 55 + (int)Math.Round(Math.Min(1, completed / (double)total) * 25);
+                    await store.SaveRunAsync(projectId, run, cancellationToken);
+                },
+                cancellationToken);
             run.ResultCount = results.Results.Count;
             run.FindingCount = results.Results.Count(result => result.Interesting);
             await store.SaveResultsAsync(projectId, results, cancellationToken);

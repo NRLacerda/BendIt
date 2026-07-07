@@ -28,7 +28,7 @@ Use BendIt only against systems you own or are explicitly authorized to test. So
 - Real HTTP test execution with verb-aware test routing and bounded response capture.
 - Per-project local JSON artifacts under `bend-results/`.
 - Results view grouped by endpoint, with per-endpoint health coverage and drill-down test evidence.
-- Theme toggle, project list, progress stepper, and auto-refresh for stored artifacts.
+- Project list driven workflow with a dedicated execution page, live progress stepper, and auto-refresh for stored artifacts.
 
 ## Run
 
@@ -105,6 +105,7 @@ graph TD
    - Fallback health/spec candidates when no endpoints were found.
    Each sub-step hands candidates to the shared verification stage, which can process candidates in parallel.
 3. **Test Battery**: Takes testable endpoints and runs configured robustness checks. Tests are routed by HTTP verb so body-oriented checks run only where request bodies make sense.
+   During this phase the runner updates `current-run.json` after completed checks so the dashboard execution page can show live progress, result count, and finding count.
 4. **Result Writing**: Aggregates all test execution data and logs to `results.json`.
 5. **Findings Analysis**: Summarizes outcome counts and determines risk highlights for the dashboard.
 

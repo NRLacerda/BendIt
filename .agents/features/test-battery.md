@@ -20,16 +20,16 @@ Executes robustness test mutations against discovered endpoints to evaluate secu
    - Skips endpoints matching path exclusion patterns.
 2. **Job Dispatching**:
    - Loops through every testable endpoint and selected test type (`bendType`), creating individual jobs.
-   - Enqueues jobs to a work channel.
-3. **Parallel Audit Workers**:
-   - Launches a pool of worker goroutines (configured by `parallelWorkers`).
-   - Processes each job linearly:
+   - Computes the planned job count before execution so run progress can advance during the test phase.
+3. **Audit Execution**:
+   - Processes each job sequentially in the current implementation:
      - **Mutation**: Mutates request properties depending on the `bendType`:
        - `idMutation` / `authConsistency`: Alters identification elements in URL variables (e.g. changing resource ID from `123` to `124`).
        - `massAssignment`: Injects administrative/extra parameters into JSON request bodies.
        - `fieldSize` / `requestSize`: Expands body/field payloads with massive string lengths.
      - **Execution**: Sends the HTTP request with the target mutation payload.
      - **Response Evaluation**: Parses returned status code and response size.
+   - Reports completed job count and finding count back to the run coordinator after each result so `current-run.json` can be polled by the frontend execution page.
 4. **Risk & Verdict Assignment**:
    - Calculates a risk rating (0–10) based on response status variations.
    - Public endpoints without authentication context, such as liveness checks returning `200 true`, remain raw healthy evidence unless the selected mutation has endpoint context that supports a finding.

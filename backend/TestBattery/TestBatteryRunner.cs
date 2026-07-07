@@ -23,9 +23,18 @@ public sealed class TestBatteryRunner
         "responseDiffing"
     ];
 
-    public async Task<ResultsDocument> RunAsync(Project project, IReadOnlyList<EndpointModel> endpoints, TestRunRequest request, CancellationToken cancellationToken)
+    public async Task<ResultsDocument> RunAsync(
+        Project project,
+        IReadOnlyList<EndpointModel> endpoints,
+        TestRunRequest request,
+        Func<int, int, int, Task>? progressCallback,
+        CancellationToken cancellationToken)
     {
         IEnumerable<string> bendTypes = request.BendTypes.Count == 0 ? DefaultBendTypes : request.BendTypes;
+        var plannedJobs = endpoints
+            .Where(endpoint => !Excluded(endpoint.Path, request.ExcludedPathPatterns))
+            .SelectMany(endpoint => ApplicableBendTypes(endpoint, bendTypes))
+            .Count();
         var results = new List<TestResult>();
         var testRunId = "run_" + ShortHash(project.ProjectId + DateTimeOffset.UtcNow.ToString("O"));
         using var client = new HttpClient { Timeout = RequestTimeout };
@@ -40,7 +49,12 @@ public sealed class TestBatteryRunner
 
             foreach (var bendType in ApplicableBendTypes(endpoint, bendTypes))
             {
-                results.Add(await CreateResultAsync(client, project, testRunId, endpoint, bendType, request, cancellationToken));
+                var result = await CreateResultAsync(client, project, testRunId, endpoint, bendType, request, cancellationToken);
+                results.Add(result);
+                if (progressCallback is not null)
+                {
+                    await progressCallback(results.Count, plannedJobs, results.Count(item => item.Interesting));
+                }
             }
         }
 
