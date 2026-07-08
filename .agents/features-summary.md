@@ -16,7 +16,7 @@ This file groups the current BendIt features by workflow stage and also keeps th
 ## Test Battery
 
 - **Verb-aware test routing**: Only runs the checks that make sense for the endpoint method, so body-oriented tests stay off `GET`, `HEAD`, and `OPTIONS`.
-- **Authentication boundary probes**: Sends missing or malformed auth variants without storing raw JWTs, cookies, or API keys.
+- **Authentication boundary probes**: Sends missing-auth, malformed JWT, and malformed cookie variants without storing raw JWTs, cookies, or API keys.
 - **BOLA / IDOR identifier mutation**: Mutates path placeholders, numeric or UUID segments, and identifier-like query parameters to test object-level authorization.
 - **Security header validation**: Checks response headers for missing or weak defensive hardening signals.
 - **Rate limit validation**: Sends a baseline request, a controlled burst, and a post-burst comparison to detect missing `429`, missing throttling headers, and degraded post-burst behavior.
@@ -24,8 +24,11 @@ This file groups the current BendIt features by workflow stage and also keeps th
 - **Field size validation**: Expands individual fields to probe validation and parser boundaries.
 - **Mass assignment testing**: Adds privileged or unexpected JSON fields to check whether the API accepts them.
 - **Content-type validation**: Sends valid JSON with `application/json`, `text/plain`, and missing `Content-Type` variants to verify that body-capable endpoints reject ambiguous or wrong media types.
-- **HTTP method validation**: Checks whether endpoints allow only the intended verbs.
-- **Response diffing**: Compares responses to spot inconsistent behavior across states or mutations.
+- **Error disclosure validation**: Sends safe malformed request probes and flags verbose validation, stack traces, framework details, database errors, connection pool failures, and internal field hints.
+- **Parameter pollution validation**: Sends duplicated query, form, and JSON parameters to detect unsafe duplicate-key collapsing, privileged value override, and ambiguous object-selection behavior.
+- **CORS validation**: Sends attacker-origin actual and preflight probes to detect wildcard origins, reflected origins, credentialed cross-origin access, and broad sensitive-header preflight approval.
+- **HTTP method validation**: Sends bounded alternate-method probes and flags endpoints that accept unexpected verbs.
+- **Response diffing**: Sends repeated identical requests and compares status, content type, body size class, and body hash for unstable behavior.
 - **Inventory exposure detection**: Flags live legacy, versioned, internal, debug, documentation, and operational routes.
 - **Sensitive data exposure detection**: Reports data classes found in bounded responses without copying the actual secret values into evidence.
 
@@ -60,9 +63,7 @@ This file groups the current BendIt features by workflow stage and also keeps th
 ## Planned Features
 
 - **Function-level authorization heuristics**: Detect routes like `/admin`, `/manage`, `/export`, or similar privileged paths and verify whether they are reachable without proper auth. Maps to OWASP API5.
-- **Parameter pollution**: Send duplicated query and body parameters to check whether the API collapses or mishandles repeated keys. Maps to API10 or API3 depending the result.
-- **CORS validation**: Exercise `Origin` handling and response headers to look for wildcard origins, reflected origins, or unsafe credential exposure. Maps to API8.
-- **Timing and error differential analysis**: Compare baseline and mutated responses to detect enumeration, inconsistent auth failures, or verbose error behavior. Maps to API1, API2, or API9 depending the signal.
+- **Timing and error differential analysis**: Compare baseline and mutated responses to detect enumeration or inconsistent auth failures. Maps to API1, API2, or API9 depending the signal.
 - **SSRF-safe URL field validation**: Probe URL-looking fields with safe invalid or documentation-reserved hosts only, then detect fetch attempts or fetch-related errors. Maps to API10.
 - **GraphQL discovery and validation**: Detect `/graphql`, introspection exposure, verbose errors, and basic query depth or field errors behind a detected GraphQL route.
 - **Report export**: Add Markdown, HTML, or SARIF-style exports from run results for offline review and CI workflows.

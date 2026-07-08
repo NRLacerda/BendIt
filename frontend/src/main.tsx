@@ -5,7 +5,7 @@ import { Cell, Pie, PieChart, ResponsiveContainer, Tooltip } from "recharts";
 import { api } from "./api";
 import logoUrl from "./assets/bendit-logo1.png";
 import { Button, ConfirmDialog, Field, SelectField, TextArea, TextInput, Toggle } from "./components";
-import type { AuthType, Endpoint, Notice, Project, RunDocument, TestResult } from "./types";
+import type { AuthType, Endpoint, Project, RunDocument, TestResult } from "./types";
 import {
   authFromInput,
   downloadJSON,
@@ -40,6 +40,7 @@ const bendTypes = [
   "cookieAnalysis",
   "securityHeaders",
   "sensitiveDataExposure",
+  "errorDisclosure",
   "rateLimit",
   "responseDiffing",
   "timingAnalysis"
@@ -68,7 +69,6 @@ function App() {
   const [runs, setRuns] = useState<RunDocument[]>([]);
   const [endpoints, setEndpoints] = useState<Endpoint[]>([]);
   const [results, setResults] = useState<TestResult[]>([]);
-  const [notice, setNotice] = useState<Notice>(null);
   const [runState, setRunState] = useState("Idle");
   const [progress, setProgress] = useState(0);
   const [currentRun, setCurrentRun] = useState<RunDocument | null>(null);
@@ -103,16 +103,6 @@ function App() {
     document.documentElement.dataset.theme = theme;
     localStorage.setItem("bendit.theme", theme);
   }, [theme]);
-
-  useEffect(() => {
-    if (!notice || notice.type !== "info") {
-      return;
-    }
-    const timer = window.setTimeout(() => {
-      setNotice((current) => (current?.type === "info" ? null : current));
-    }, 3500);
-    return () => window.clearTimeout(timer);
-  }, [notice]);
 
   useEffect(() => {
     loadProjects();
@@ -420,16 +410,16 @@ function App() {
   }
 
   function success(message: string) {
-    setNotice({ type: "success", message });
+    console.info(message);
   }
 
   function info(message: string) {
-    setNotice({ type: "info", message });
+    console.info(message);
   }
 
   function fail(error: unknown) {
     const message = error instanceof Error ? error.message : String(error);
-    setNotice({ type: "error", message });
+    console.error(message);
   }
 
   return (
@@ -478,7 +468,6 @@ function App() {
             <Button onClick={() => downloadJSON("project.json", project)}><Download size={16} /> JSON</Button>
           </div>
         </header>
-        {notice && <div className={`toast ${notice.type}`}>{notice.message}</div>}
         {view === "projects" && (
           <section>
             <div className="toolbar">
@@ -1245,6 +1234,8 @@ function ResultsView(props: {
   selectedResult: TestResult | null;
   setSelectedResult: (result: TestResult) => void;
 }) {
+  const resultPageSize = 15;
+  const [resultPage, setResultPage] = useState(1);
   const raw = props.allResults.length;
   const coveredEndpointCount = useMemo(() => new Set(props.allResults.map((result) => result.endpointId)).size, [props.allResults]);
   const healthData = useMemo(() => endpointHealthData(props.endpointSummary.total, props.allResults), [props.endpointSummary.total, props.allResults]);
@@ -1252,15 +1243,24 @@ function ResultsView(props: {
   const warning = healthData.find((item) => item.name === "Warning")?.value || 0;
   const threat = healthData.find((item) => item.name === "Threat")?.value || 0;
   const endpointRows = useMemo(() => endpointResultRows(props.results), [props.results]);
-  const selectedEndpointId = props.selectedResult && endpointRows.some((row) => row.endpointId === props.selectedResult?.endpointId)
+  const totalResultPages = Math.max(1, Math.ceil(endpointRows.length / resultPageSize));
+  const safeResultPage = Math.min(resultPage, totalResultPages);
+  const resultStart = endpointRows.length === 0 ? 0 : (safeResultPage - 1) * resultPageSize + 1;
+  const resultEnd = Math.min(safeResultPage * resultPageSize, endpointRows.length);
+  const visibleEndpointRows = endpointRows.slice((safeResultPage - 1) * resultPageSize, safeResultPage * resultPageSize);
+  const selectedEndpointId = props.selectedResult && visibleEndpointRows.some((row) => row.endpointId === props.selectedResult?.endpointId)
     ? props.selectedResult.endpointId
-    : endpointRows[0]?.endpointId;
+    : visibleEndpointRows[0]?.endpointId || endpointRows[0]?.endpointId;
   const selectedEndpointResults = useMemo(() => props.allResults
     .filter((result) => result.endpointId === selectedEndpointId)
     .sort((left, right) => right.risk - left.risk || left.bendType.localeCompare(right.bendType)), [props.allResults, selectedEndpointId]);
   const selected = selectedEndpointResults.find((result) => result.id === props.selectedResult?.id) || selectedEndpointResults[0] || null;
 
   const [activeTab, setActiveTab] = useState<"verdict" | "request" | "response" | "mutation">("verdict");
+
+  useEffect(() => {
+    setResultPage(1);
+  }, [props.resultMode, props.resultType, props.riskFilter, props.resultSearch, props.results.length]);
 
   // Helper to format mutation details in human-readable terms
   function formatMutation(mutation: Record<string, any>): string {
@@ -1344,7 +1344,7 @@ function ResultsView(props: {
           <table className="results-table">
             <thead><tr><th>Score</th><th>Health</th><th>Endpoint</th><th>Checks</th><th>HTTP</th><th>Last seen</th></tr></thead>
             <tbody>
-              {endpointRows.map((row) => (
+              {visibleEndpointRows.map((row) => (
                 <tr key={row.endpointId} className={`${selectedEndpointId === row.endpointId ? "is-selected" : ""} ${row.maxRisk >= 7 ? "finding-row" : ""}`} onClick={() => props.setSelectedResult(row.representative)}>
                   <td><span className={`risk-score ${riskClass(row.maxRisk)}`}>{row.maxRisk}</span></td>
                   <td>
@@ -1360,6 +1360,14 @@ function ResultsView(props: {
               ))}
             </tbody>
           </table>
+          <div className="pagination-bar">
+            <span>{resultStart}-{resultEnd} of {endpointRows.length}</span>
+            <div className="pagination-controls">
+              <Button onClick={() => setResultPage((value) => Math.max(1, value - 1))} disabled={safeResultPage === 1}>Previous</Button>
+              <span>Page {safeResultPage} of {totalResultPages}</span>
+              <Button onClick={() => setResultPage((value) => Math.min(totalResultPages, value + 1))} disabled={safeResultPage === totalResultPages}>Next</Button>
+            </div>
+          </div>
         </div>
 
         <section className="result-detail">

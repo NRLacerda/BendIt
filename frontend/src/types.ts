@@ -123,8 +123,3 @@ export type RunConfig = {
   discovery: DiscoveryConfig;
   tests: TestConfig;
 };
-
-export type Notice = {
-  type: "success" | "error" | "info";
-  message: string;
-} | null;

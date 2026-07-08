@@ -22,6 +22,9 @@ internal sealed class RobustnessTestRegistry
         new SensitiveDataExposureTest(),
         new ResponseDiffingTest(),
         new ContentTypeValidationTest(),
+        new ErrorDisclosureTest(),
+        new ParameterPollutionTest(),
+        new CorsAnalysisTest(),
         new RateLimitTest()
     ]);
 

@@ -15,13 +15,19 @@ Checks whether endpoints that appear protected reject missing or malformed authe
 ## Processing
 
 1. **No-Auth Probe**:
-   - Executes the endpoint without authentication for `authConsistency`.
+   - Executes the endpoint with common auth headers removed for `authConsistency`.
    - Flags protected endpoints that still return 2xx.
-2. **Malformed Auth Probe**:
-   - Sends deterministic invalid bearer or cookie values for JWT/cookie tests.
+2. **Malformed JWT Probes**:
+   - Sends deterministic malformed, unsigned-shape, and empty bearer token probes for `jwtAnalysis`.
+   - Masks the `Authorization` header in stored request evidence.
+3. **Malformed Cookie Probes**:
+   - Sends invalid, empty, and duplicated session cookie probes for `cookieAnalysis`.
+   - Masks the `Cookie` header in stored request evidence.
+4. **Secret Handling**:
    - Does not persist or require raw user secrets.
-3. **Risk Assignment**:
+5. **Risk Assignment**:
    - Treats 2xx responses on protected endpoints as high-risk authentication failures.
+   - Treats parser/server errors as suspicious because malformed credentials should not crash auth handling.
    - Stores request headers masked in the result evidence.
 
 ## Outputs

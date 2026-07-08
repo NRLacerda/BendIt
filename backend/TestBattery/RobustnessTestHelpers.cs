@@ -85,19 +85,58 @@ internal static class RobustnessTestHelpers
         bool sendContentType,
         CancellationToken cancellationToken)
     {
+        return await ExecuteAsync(
+            client,
+            method,
+            url,
+            body,
+            project,
+            bendType,
+            requestContentType,
+            sendContentType,
+            [],
+            [],
+            cancellationToken);
+    }
+
+    public static async Task<ExecutedRequest> ExecuteAsync(
+        HttpClient client,
+        string method,
+        string url,
+        string? body,
+        Project project,
+        string bendType,
+        string? requestContentType,
+        bool sendContentType,
+        IEnumerable<KeyValuePair<string, string>> extraHeaders,
+        IEnumerable<string> excludedProjectHeaders,
+        CancellationToken cancellationToken)
+    {
         var started = Stopwatch.StartNew();
         var result = new ExecutedRequest();
         try
         {
             using var request = new HttpRequestMessage(new HttpMethod(method), url);
             request.Headers.TryAddWithoutValidation("Accept", "application/json, text/plain, */*");
+            var excluded = excludedProjectHeaders.ToHashSet(StringComparer.OrdinalIgnoreCase);
             foreach (var header in project.Headers ?? [])
             {
+                if (excluded.Contains(header.Key))
+                {
+                    continue;
+                }
+
                 request.Headers.TryAddWithoutValidation(header.Key, header.Value);
             }
 
             foreach (var header in BoundaryAuthHeaders(project, bendType))
             {
+                request.Headers.TryAddWithoutValidation(header.Key, header.Value);
+            }
+
+            foreach (var header in extraHeaders)
+            {
+                request.Headers.Remove(header.Key);
                 request.Headers.TryAddWithoutValidation(header.Key, header.Value);
             }
 
@@ -325,7 +364,7 @@ internal static class RobustnessTestHelpers
             "authConsistency" or "idMutation" or "massAssignment" => "Authorization",
             "jwtAnalysis" => "Authentication",
             "requestSize" => "Request Size",
-            "sensitiveDataExposure" => "Data Exposure",
+            "sensitiveDataExposure" or "errorDisclosure" => "Data Exposure",
             "rateLimit" => "Rate Limiting",
             "responseDiffing" or "inventoryExposure" => "Contract Consistency",
             _ => "Input Validation"
@@ -341,7 +380,7 @@ internal static class RobustnessTestHelpers
             "massAssignment" or "sensitiveDataExposure" => "API3: Broken Object Property Level Authorization",
             "requestSize" or "fieldSize" or "rateLimit" or "timingAnalysis" => "API4: Unrestricted Resource Consumption",
             "httpMethodValidation" => "API5: Broken Function Level Authorization",
-            "corsAnalysis" or "headerAnalysis" or "contentTypeValidation" or "securityHeaders" => "API8: Security Misconfiguration",
+            "corsAnalysis" or "headerAnalysis" or "contentTypeValidation" or "securityHeaders" or "errorDisclosure" => "API8: Security Misconfiguration",
             "responseDiffing" or "inventoryExposure" => "API9: Improper Inventory Management",
             "payloadValidation" or "parameterPollution" => "API10: Unsafe Consumption of APIs",
             _ => "API8: Security Misconfiguration"
@@ -363,6 +402,8 @@ internal static class RobustnessTestHelpers
             "headerAnalysis" => $"{prefix} Remove verbose platform headers and add defensive response headers where appropriate.",
             "securityHeaders" => $"{prefix} Remove verbose platform headers, set X-Content-Type-Options, and harden cookie attributes when cookies are used.",
             "contentTypeValidation" => $"{prefix} Require expected content types and reject ambiguous request payload formats.",
+            "parameterPollution" => $"{prefix} Reject duplicated request parameters for security-sensitive fields, canonicalize repeated keys before authorization decisions, and return validation errors for ambiguous input.",
+            "errorDisclosure" => $"{prefix} Return sanitized problem details to callers, disable debug error pages, log detailed exceptions server-side, and avoid exposing internal fields or dependency failures.",
             "rateLimit" => $"{prefix} Add per-user and per-origin throttling for sensitive or expensive endpoints.",
             "responseDiffing" => $"{prefix} Maintain a current endpoint inventory and investigate undocumented live routes.",
             "inventoryExposure" => $"{prefix} Remove or protect legacy, debug, documentation, and environment-only routes, and keep a reviewed API inventory with deprecation owners.",
@@ -390,6 +431,20 @@ internal static class RobustnessTestHelpers
             : ConcretePath(endpoint.Path, "1");
         var query = bendType == "idMutation" ? IdentifierQuery(endpoint.QueryParams, "2") : "";
         return endpoint.Scheme + "://" + endpoint.Host + port + path + query;
+    }
+
+    public static string AppendQuery(string url, IEnumerable<KeyValuePair<string, string>> parameters)
+    {
+        var pairs = parameters
+            .Select(parameter => Uri.EscapeDataString(parameter.Key) + "=" + Uri.EscapeDataString(parameter.Value))
+            .ToList();
+        if (pairs.Count == 0)
+        {
+            return url;
+        }
+
+        var separator = url.Contains('?', StringComparison.Ordinal) ? "&" : "?";
+        return url + separator + string.Join("&", pairs);
     }
 
     public static string ConcretePath(string path, string replacement)

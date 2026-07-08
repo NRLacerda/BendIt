@@ -105,12 +105,6 @@ h2 { font-size: 16px; }
 }
 .breadcrumbs strong { color: var(--ink); }
 
-.notice, .toast { border: 1px solid var(--line); border-radius: 8px; background: var(--panel); padding: 12px 14px; font-weight: 700; }
-.notice { margin-bottom: 16px; }
-.toast { position: fixed; right: 22px; bottom: 22px; z-index: 40; max-width: min(420px, calc(100vw - 44px)); box-shadow: var(--shadow); }
-.notice.success, .toast.success { border-color: color-mix(in srgb, var(--good) 55%, var(--line)); background: color-mix(in srgb, var(--good) 13%, var(--panel)); color: var(--good); }
-.notice.error, .toast.error { border-color: color-mix(in srgb, var(--danger) 55%, var(--line)); background: color-mix(in srgb, var(--danger) 13%, var(--panel)); color: var(--danger); }
-.notice.info, .toast.info { border-color: color-mix(in srgb, var(--accent) 55%, var(--line)); background: color-mix(in srgb, var(--accent) 13%, var(--panel)); color: var(--accent); }
 
 .split-layout, .tests-layout, .results-layout { display: grid; gap: 18px; }
 .projects-layout { display: grid; gap: 18px; grid-template-columns: minmax(360px, .95fr) minmax(0, 1.05fr); }

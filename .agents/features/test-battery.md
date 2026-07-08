@@ -26,13 +26,15 @@ Executes robustness test mutations against discovered endpoints to evaluate secu
    - Processes each job sequentially in the current implementation:
      - **Mutation**: Mutates request properties depending on the `bendType`:
        - `idMutation`: Alters identification elements in path variables, numeric/UUID path segments, or identifier-like query parameters.
-       - `authConsistency` / `jwtAnalysis` / `cookieAnalysis`: Checks missing or malformed authentication boundaries without persisting raw secrets.
+       - `authConsistency` / `jwtAnalysis` / `cookieAnalysis`: Checks missing authentication, malformed bearer tokens, unsigned-token shapes, and invalid cookies without persisting raw secrets.
        - `massAssignment`: Injects administrative/extra parameters into JSON request bodies.
        - `fieldSize` / `requestSize`: Expands body/field payloads with massive string lengths.
        - `securityHeaders`: Reviews captured response headers for common hardening gaps.
        - `inventoryExposure`: Flags live versioned, legacy, deprecated, internal, debug, documentation, and operational routes.
        - `sensitiveDataExposure`: Reviews bounded response bodies for sensitive data classes and records only field/data categories, not values.
        - `rateLimit`: Sends a baseline request, a sequential controlled burst, and a post-burst comparison request. The burst uses `maxRequestsPerEndpoint` when provided, defaults to 5, and is clamped between 2 and 10 burst requests.
+       - `httpMethodValidation`: Sends bounded alternate-method probes and flags unexpected 2xx responses.
+       - `responseDiffing`: Sends two identical requests and compares status, content type, body size class, and body hash.
      - **Execution**: Sends the HTTP request with the target mutation payload.
      - **Response Evaluation**: Parses returned status code, response size, masked headers, bounded body, OWASP category, and remediation recommendation.
        - `rateLimit` evaluates whether the burst produced HTTP 429, whether common throttling headers were present, and whether the post-burst response changed status, content type, body size/hash, or throttling-header state compared with the baseline.
