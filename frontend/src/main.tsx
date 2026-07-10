@@ -24,6 +24,7 @@ type View = "projects" | "projectForm" | "projectRuns" | "run" | "execution" | "
 type Theme = "dark" | "light";
 
 const bendTypes = [
+  "dependencyResilience",
   "authConsistency",
   "jwtAnalysis",
   "httpMethodValidation",
@@ -31,6 +32,7 @@ const bendTypes = [
   "requestSize",
   "fieldSize",
   "massAssignment",
+  "ssrfUrlValidation",
   "idMutation",
   "inventoryExposure",
   "parameterPollution",
@@ -47,6 +49,7 @@ const bendTypes = [
 ];
 
 const defaultBendTypes = [
+  "dependencyResilience",
   "authConsistency",
   "jwtAnalysis",
   "httpMethodValidation",
@@ -54,6 +57,7 @@ const defaultBendTypes = [
   "requestSize",
   "fieldSize",
   "massAssignment",
+  "ssrfUrlValidation",
   "idMutation",
   "inventoryExposure",
   "securityHeaders",
@@ -95,6 +99,7 @@ function App() {
   const [selectedTypes, setSelectedTypes] = useState<string[]>(defaultBendTypes);
   const [maxRequests, setMaxRequests] = useState("200");
   const [parallelWorkers, setParallelWorkers] = useState("6");
+  const [downDetectionThreshold, setDownDetectionThreshold] = useState("5");
   const [fieldSizes, setFieldSizes] = useState("1,10,50,100");
   const [bodySizes, setBodySizes] = useState("1,10,50,100,150");
   const [excludedPaths, setExcludedPaths] = useState("/payment\n/charge\n/transfer\n/withdraw\n/delete");
@@ -289,6 +294,7 @@ function App() {
           bendTypes: selectedTypes,
           maxRequestsPerEndpoint: Number(maxRequests) || 200,
           parallelWorkers: Number(parallelWorkers) || 6,
+          downDetectionThreshold: Number(downDetectionThreshold),
           fieldSizesKb: parseNumberList(fieldSizes),
           bodySizesKb: parseNumberList(bodySizes),
           excludedPathPatterns: parseLines(excludedPaths)
@@ -545,6 +551,8 @@ function App() {
             setMaxRequests={setMaxRequests}
             parallelWorkers={parallelWorkers}
             setParallelWorkers={setParallelWorkers}
+            downDetectionThreshold={downDetectionThreshold}
+            setDownDetectionThreshold={setDownDetectionThreshold}
             fieldSizes={fieldSizes}
             setFieldSizes={setFieldSizes}
             bodySizes={bodySizes}
@@ -847,6 +855,8 @@ function RunView(props: {
   setMaxRequests: (value: string) => void;
   parallelWorkers: string;
   setParallelWorkers: (value: string) => void;
+  downDetectionThreshold: string;
+  setDownDetectionThreshold: (value: string) => void;
   fieldSizes: string;
   setFieldSizes: (value: string) => void;
   bodySizes: string;
@@ -913,6 +923,7 @@ function RunView(props: {
           <div className="battery-summary">
             <span>Max {props.maxRequests} requests</span>
             <span>{props.parallelWorkers} workers</span>
+            <span>Stop after {props.downDetectionThreshold || "0"} matching failures</span>
             <span>{parseLines(props.excludedPaths).length} exclusions</span>
           </div>
         <div className="battery-actions">
@@ -939,6 +950,7 @@ function RunView(props: {
           <div className="form-grid settings-grid">
             <Field label="Max requests per endpoint"><TextInput value={props.maxRequests} onChange={(event) => props.setMaxRequests(event.target.value)} /></Field>
             <Field label="Parallel workers"><TextInput value={props.parallelWorkers} onChange={(event) => props.setParallelWorkers(event.target.value)} /></Field>
+            <Field label="Down detection threshold"><TextInput value={props.downDetectionThreshold} onChange={(event) => props.setDownDetectionThreshold(event.target.value)} /></Field>
             <Field label="Field sizes KB"><TextInput value={props.fieldSizes} onChange={(event) => props.setFieldSizes(event.target.value)} /></Field>
             <Field label="Body sizes KB"><TextInput value={props.bodySizes} onChange={(event) => props.setBodySizes(event.target.value)} /></Field>
             <Field label="Excluded path patterns" className="full-span"><TextArea rows={4} value={props.excludedPaths} onChange={(event) => props.setExcludedPaths(event.target.value)} /></Field>
@@ -1279,6 +1291,15 @@ function ResultsView(props: {
     if (type === "bodyExpansion" || type === "requestSize") {
       return `Expanded the overall request body size to verify maximum body size constraints and check for Denial of Service or resource exhaustion vulnerabilities.`;
     }
+    if (type === "dependencyResilience") {
+      return `Sent a bounded repeated request sequence to detect backend dependency degradation, connection-pool exhaustion, or downstream socket timeout behavior.`;
+    }
+    if (type === "apiDownGuard") {
+      return `Stopped the remaining test battery after repeated matching failure responses indicated the target API was likely down or degraded.`;
+    }
+    if (type === "ssrfUrlValidation") {
+      return `Injected documentation-reserved HTTP(S) URLs into URL-looking fields to verify that the API rejects unsafe server-side URL consumption.`;
+    }
     return `Applied mutation '${type}' with properties: ${JSON.stringify(mutation)}`;
   }
 
@@ -1567,6 +1588,7 @@ function isDefaultBatterySettings(props: {
   selectedTypes: string[];
   maxRequests: string;
   parallelWorkers: string;
+  downDetectionThreshold: string;
   fieldSizes: string;
   bodySizes: string;
   excludedPaths: string;
@@ -1577,6 +1599,7 @@ function isDefaultBatterySettings(props: {
     selected.every((type, index) => type === defaults[index]) &&
     props.maxRequests === "200" &&
     props.parallelWorkers === "6" &&
+    props.downDetectionThreshold === "5" &&
     props.fieldSizes === "1,10,50,100" &&
     props.bodySizes === "1,10,50,100,150" &&
     props.excludedPaths === "/payment\n/charge\n/transfer\n/withdraw\n/delete";

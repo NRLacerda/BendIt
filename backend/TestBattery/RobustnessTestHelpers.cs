@@ -11,9 +11,33 @@ internal static class RobustnessTestHelpers
     public const int MaxResultBodyBytes = 100 * 1024;
     public static readonly TimeSpan RequestTimeout = TimeSpan.FromSeconds(5);
 
+    private static readonly string[] DependencyFailureTerms =
+    [
+        "MongoTimeoutException",
+        "MongoSocketOpenException",
+        "Timed out while waiting for a server",
+        "Connect timed out",
+        "HikariPool",
+        "SQLTransientConnectionException",
+        "JDBCConnectionException",
+        "RedisConnectionException",
+        "ECONNREFUSED",
+        "ETIMEDOUT",
+        "connection pool",
+        "No available connections",
+        "Exception opening socket",
+        "connection refused"
+    ];
+
     public static bool RequiresRequestBody(string bendType)
     {
-        return bendType is "payloadValidation" or "requestSize" or "fieldSize" or "massAssignment" or "contentTypeValidation";
+        return bendType is "payloadValidation" or "requestSize" or "fieldSize" or "massAssignment" or "contentTypeValidation" or "ssrfUrlValidation";
+    }
+
+    public static int DownDetectionThreshold(TestRunRequest request)
+    {
+        if (request.DownDetectionThreshold == 0) return 0;
+        return Math.Clamp(request.DownDetectionThreshold ?? 5, 3, 10);
     }
 
     public static bool AllowsRequestBody(string method)
@@ -364,6 +388,7 @@ internal static class RobustnessTestHelpers
             "authConsistency" or "idMutation" or "massAssignment" => "Authorization",
             "jwtAnalysis" => "Authentication",
             "requestSize" => "Request Size",
+            "dependencyResilience" or "apiDownGuard" => "Resource Exhaustion",
             "sensitiveDataExposure" or "errorDisclosure" => "Data Exposure",
             "rateLimit" => "Rate Limiting",
             "responseDiffing" or "inventoryExposure" => "Contract Consistency",
@@ -378,11 +403,11 @@ internal static class RobustnessTestHelpers
             "idMutation" => "API1: Broken Object Level Authorization",
             "authConsistency" or "jwtAnalysis" or "cookieAnalysis" => "API2: Broken Authentication",
             "massAssignment" or "sensitiveDataExposure" => "API3: Broken Object Property Level Authorization",
-            "requestSize" or "fieldSize" or "rateLimit" or "timingAnalysis" => "API4: Unrestricted Resource Consumption",
+            "requestSize" or "fieldSize" or "rateLimit" or "timingAnalysis" or "dependencyResilience" or "apiDownGuard" => "API4: Unrestricted Resource Consumption",
             "httpMethodValidation" => "API5: Broken Function Level Authorization",
             "corsAnalysis" or "headerAnalysis" or "contentTypeValidation" or "securityHeaders" or "errorDisclosure" => "API8: Security Misconfiguration",
             "responseDiffing" or "inventoryExposure" => "API9: Improper Inventory Management",
-            "payloadValidation" or "parameterPollution" => "API10: Unsafe Consumption of APIs",
+            "payloadValidation" or "parameterPollution" or "ssrfUrlValidation" => "API10: Unsafe Consumption of APIs",
             _ => "API8: Security Misconfiguration"
         };
     }
@@ -397,11 +422,13 @@ internal static class RobustnessTestHelpers
             "massAssignment" => $"{prefix} Bind only explicitly allowed request fields and ignore or reject privileged object properties.",
             "sensitiveDataExposure" => $"{prefix} Return only fields required by the caller, redact secrets, and enforce response-level authorization on sensitive object properties.",
             "requestSize" or "fieldSize" => $"{prefix} Apply request size, field length, timeout, and parsing limits before business logic runs.",
+            "dependencyResilience" or "apiDownGuard" => $"{prefix} Review database/client connection pooling, connection lifetime, socket/connect timeouts, slow queries, retry behavior, and sanitized dependency error handling.",
             "httpMethodValidation" => $"{prefix} Restrict each endpoint to intended HTTP methods and require authorization for privileged functions.",
             "corsAnalysis" => $"{prefix} Use narrow CORS origins, methods, and credential policies.",
             "headerAnalysis" => $"{prefix} Remove verbose platform headers and add defensive response headers where appropriate.",
             "securityHeaders" => $"{prefix} Remove verbose platform headers, set X-Content-Type-Options, and harden cookie attributes when cookies are used.",
             "contentTypeValidation" => $"{prefix} Require expected content types and reject ambiguous request payload formats.",
+            "ssrfUrlValidation" => $"{prefix} Validate URL fields with strict scheme and host allowlists, block private or internal destinations after DNS resolution, and return sanitized validation errors.",
             "parameterPollution" => $"{prefix} Reject duplicated request parameters for security-sensitive fields, canonicalize repeated keys before authorization decisions, and return validation errors for ambiguous input.",
             "errorDisclosure" => $"{prefix} Return sanitized problem details to callers, disable debug error pages, log detailed exceptions server-side, and avoid exposing internal fields or dependency failures.",
             "rateLimit" => $"{prefix} Add per-user and per-origin throttling for sensitive or expensive endpoints.",
@@ -572,6 +599,25 @@ internal static class RobustnessTestHelpers
     public static string ShortHash(string value)
     {
         return Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(value))).ToLowerInvariant()[..12];
+    }
+
+    public static List<string> DependencyFailureSignals(string text)
+    {
+        var signals = new List<string>();
+        if (string.IsNullOrWhiteSpace(text))
+        {
+            return signals;
+        }
+
+        foreach (var term in DependencyFailureTerms)
+        {
+            if (text.Contains(term, StringComparison.OrdinalIgnoreCase) && !signals.Contains(term, StringComparer.OrdinalIgnoreCase))
+            {
+                signals.Add(term);
+            }
+        }
+
+        return signals;
     }
 
     private static bool HasHeader(Dictionary<string, string> headers, string name)

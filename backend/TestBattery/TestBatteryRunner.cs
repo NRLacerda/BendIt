@@ -8,6 +8,7 @@ public sealed class TestBatteryRunner
 {
     private static readonly string[] DefaultBendTypes =
     [
+        "dependencyResilience",
         "authConsistency",
         "jwtAnalysis",
         "httpMethodValidation",
@@ -15,6 +16,7 @@ public sealed class TestBatteryRunner
         "requestSize",
         "fieldSize",
         "massAssignment",
+        "ssrfUrlValidation",
         "idMutation",
         "inventoryExposure",
         "securityHeaders",
@@ -46,7 +48,7 @@ public sealed class TestBatteryRunner
         Func<int, int, int, Task>? progressCallback,
         CancellationToken cancellationToken)
     {
-        IEnumerable<string> selectedBendTypes = request.BendTypes.Count == 0 ? DefaultBendTypes : request.BendTypes;
+        IEnumerable<string> selectedBendTypes = PrioritizedBendTypes(request.BendTypes.Count == 0 ? DefaultBendTypes : request.BendTypes);
         var selectedTests = tests.Resolve(selectedBendTypes).ToList();
         var plannedJobs = endpoints
             .Where(endpoint => !RobustnessTestHelpers.Excluded(endpoint.Path, request.ExcludedPathPatterns))
@@ -54,11 +56,18 @@ public sealed class TestBatteryRunner
             .Count();
         var results = new List<TestResult>();
         var testRunId = "run_" + RobustnessTestHelpers.ShortHash(project.ProjectId + DateTimeOffset.UtcNow.ToString("O"));
+        var apiDownGuard = new ApiDownGuard(RobustnessTestHelpers.DownDetectionThreshold(request));
+        var stopRun = false;
 
         using var client = new HttpClient { Timeout = RobustnessTestHelpers.RequestTimeout };
         foreach (var endpoint in endpoints)
         {
             cancellationToken.ThrowIfCancellationRequested();
+            if (stopRun)
+            {
+                break;
+            }
+
             if (RobustnessTestHelpers.Excluded(endpoint.Path, request.ExcludedPathPatterns))
             {
                 continue;
@@ -66,6 +75,11 @@ public sealed class TestBatteryRunner
 
             foreach (var test in selectedTests)
             {
+                if (stopRun)
+                {
+                    break;
+                }
+
                 if (!test.AppliesTo(endpoint, request))
                 {
                     continue;
@@ -79,6 +93,17 @@ public sealed class TestBatteryRunner
                 {
                     await progressCallback(results.Count, plannedJobs, results.Count(item => item.Interesting));
                 }
+
+                var guardResult = apiDownGuard.Observe(project, testRunId, result);
+                if (guardResult is not null)
+                {
+                    results.Add(guardResult);
+                    stopRun = true;
+                    if (progressCallback is not null)
+                    {
+                        await progressCallback(results.Count, plannedJobs, results.Count(item => item.Interesting));
+                    }
+                }
             }
         }
 
@@ -88,5 +113,26 @@ public sealed class TestBatteryRunner
             ProjectId = project.ProjectId,
             Results = results
         };
+    }
+
+    private static IEnumerable<string> PrioritizedBendTypes(IEnumerable<string> bendTypes)
+    {
+        var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        var selected = bendTypes.ToList();
+        foreach (var bendType in selected.Where(item => item.Equals("dependencyResilience", StringComparison.OrdinalIgnoreCase)))
+        {
+            if (seen.Add(bendType))
+            {
+                yield return bendType;
+            }
+        }
+
+        foreach (var bendType in selected.Where(item => !item.Equals("dependencyResilience", StringComparison.OrdinalIgnoreCase)))
+        {
+            if (seen.Add(bendType))
+            {
+                yield return bendType;
+            }
+        }
     }
 }

@@ -8,6 +8,7 @@ internal sealed class RobustnessTestRegistry
 
     public static RobustnessTestRegistry Default { get; } = new(
     [
+        new DependencyResilienceTest(),
         new AuthConsistencyTest(),
         new JwtAnalysisTest(),
         new CookieAnalysisTest(),
@@ -16,6 +17,7 @@ internal sealed class RobustnessTestRegistry
         new RequestSizeTest(),
         new FieldSizeTest(),
         new MassAssignmentTest(),
+        new SsrfUrlValidationTest(),
         new IdMutationTest(),
         new InventoryExposureTest(),
         new SecurityHeadersTest(),

@@ -16,6 +16,8 @@ This file groups the current BendIt features by workflow stage and also keeps th
 ## Test Battery
 
 - **Verb-aware test routing**: Only runs the checks that make sense for the endpoint method, so body-oriented tests stay off `GET`, `HEAD`, and `OPTIONS`.
+- **Dependency resilience validation**: Runs early repeated safe requests to detect backend dependency failures, connection-pool exhaustion symptoms, and socket timeout signatures.
+- **API down guard**: Stops the whole test battery after a configurable number of sequential near-identical failure responses, defaulting to five.
 - **Authentication boundary probes**: Sends missing-auth, malformed JWT, and malformed cookie variants without storing raw JWTs, cookies, or API keys.
 - **BOLA / IDOR identifier mutation**: Mutates path placeholders, numeric or UUID segments, and identifier-like query parameters to test object-level authorization.
 - **Security header validation**: Checks response headers for missing or weak defensive hardening signals.
@@ -26,6 +28,7 @@ This file groups the current BendIt features by workflow stage and also keeps th
 - **Content-type validation**: Sends valid JSON with `application/json`, `text/plain`, and missing `Content-Type` variants to verify that body-capable endpoints reject ambiguous or wrong media types.
 - **Error disclosure validation**: Sends safe malformed request probes and flags verbose validation, stack traces, framework details, database errors, connection pool failures, and internal field hints.
 - **Parameter pollution validation**: Sends duplicated query, form, and JSON parameters to detect unsafe duplicate-key collapsing, privileged value override, and ambiguous object-selection behavior.
+- **SSRF-safe URL field validation**: Probes URL-looking body fields with documentation-reserved HTTP(S) hosts only, then validates that the endpoint returns a `4xx` or explicit URL rejection message instead of accepting the field or leaking fetch-related errors.
 - **CORS validation**: Sends attacker-origin actual and preflight probes to detect wildcard origins, reflected origins, credentialed cross-origin access, and broad sensitive-header preflight approval.
 - **HTTP method validation**: Sends bounded alternate-method probes and flags endpoints that accept unexpected verbs.
 - **Response diffing**: Sends repeated identical requests and compares status, content type, body size class, and body hash for unstable behavior.
@@ -64,6 +67,5 @@ This file groups the current BendIt features by workflow stage and also keeps th
 
 - **Function-level authorization heuristics**: Detect routes like `/admin`, `/manage`, `/export`, or similar privileged paths and verify whether they are reachable without proper auth. Maps to OWASP API5.
 - **Timing and error differential analysis**: Compare baseline and mutated responses to detect enumeration or inconsistent auth failures. Maps to API1, API2, or API9 depending the signal.
-- **SSRF-safe URL field validation**: Probe URL-looking fields with safe invalid or documentation-reserved hosts only, then detect fetch attempts or fetch-related errors. Maps to API10.
 - **GraphQL discovery and validation**: Detect `/graphql`, introspection exposure, verbose errors, and basic query depth or field errors behind a detected GraphQL route.
 - **Report export**: Add Markdown, HTML, or SARIF-style exports from run results for offline review and CI workflows.

@@ -295,6 +295,89 @@ internal sealed class LocalApiServer : IAsyncDisposable
             return;
         }
 
+        if (path == "/api/ssrf/strict")
+        {
+            if (!IsMethod(method, "POST"))
+            {
+                await WriteAsync(stream, 405, """{"error":"method not allowed"}""", "application/json");
+                return;
+            }
+
+            await WriteAsync(stream, 400, """{"error":"invalid url: external URL hosts are not allowed"}""", "application/json");
+            return;
+        }
+
+        if (path == "/api/ssrf/message-rejection")
+        {
+            if (!IsMethod(method, "POST"))
+            {
+                await WriteAsync(stream, 405, """{"error":"method not allowed"}""", "application/json");
+                return;
+            }
+
+            await WriteAsync(stream, 200, """{"error":"not allowed: remote URL was blocked"}""", "application/json");
+            return;
+        }
+
+        if (path == "/api/ssrf/accepted")
+        {
+            if (!IsMethod(method, "POST"))
+            {
+                await WriteAsync(stream, 405, """{"error":"method not allowed"}""", "application/json");
+                return;
+            }
+
+            await WriteAsync(stream, 200, """{"accepted":true,"queued":true}""", "application/json");
+            return;
+        }
+
+        if (path == "/api/ssrf/fetch-error")
+        {
+            if (!IsMethod(method, "POST"))
+            {
+                await WriteAsync(stream, 405, """{"error":"method not allowed"}""", "application/json");
+                return;
+            }
+
+            await WriteAsync(stream, 500, """{"error":"fetch failed: DNS resolve ENOTFOUND example.invalid"}""", "application/json");
+            return;
+        }
+
+        if (path == "/api/dependency/healthy")
+        {
+            await WriteAsync(stream, 200, """{"ok":true,"dependency":"stable"}""", "application/json");
+            return;
+        }
+
+        if (path == "/api/dependency/mongo-timeout")
+        {
+            await WriteAsync(stream, 500, """{"error":"MongoTimeoutException: Timed out while waiting for a server that matches ReadPreferenceServerSelector. MongoSocketOpenException: Exception opening socket. java.net.SocketTimeoutException: Connect timed out"}""", "application/json");
+            return;
+        }
+
+        if (path == "/api/dependency/generic-failure")
+        {
+            await WriteAsync(stream, 500, """{"error":"upstream dependency unavailable","requestId":"00000000-0000-0000-0000-000000000001","durationMs":1250}""", "application/json");
+            return;
+        }
+
+        if (path == "/api/dependency/transient-failure")
+        {
+            var status = count <= 4 ? 500 : 200;
+            var body = status == 500 ? """{"error":"temporary dependency unavailable"}""" : """{"ok":true}""";
+            await WriteAsync(stream, status, body, "application/json");
+            return;
+        }
+
+        if (path == "/api/dependency/mixed-failure")
+        {
+            var body = count % 2 == 0
+                ? """{"error":"database unavailable"}"""
+                : """{"error":"cache unavailable"}""";
+            await WriteAsync(stream, 500, body, "application/json");
+            return;
+        }
+
         if (path == "/api/large")
         {
             await WriteAsync(stream, 200, new string('A', 130 * 1024), "text/plain");

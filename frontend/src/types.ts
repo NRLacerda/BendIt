@@ -100,6 +100,7 @@ export type TestConfig = {
   bendTypes: string[];
   maxRequestsPerEndpoint: number;
   parallelWorkers: number;
+  downDetectionThreshold: number;
   fieldSizesKb: number[];
   bodySizesKb: number[];
   excludedPathPatterns: string[];

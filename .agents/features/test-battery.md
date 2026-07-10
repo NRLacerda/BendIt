@@ -9,6 +9,7 @@ Executes robustness test mutations against discovered endpoints to evaluate secu
 - **Test Request Settings** (`model.TestRunRequest`):
   - `bendTypes` (`[]string`): List of test types to run (e.g. `idMutation`, `massAssignment`, `requestSize`, `fieldSize`, `rateLimit`, `securityHeaders`, `inventoryExposure`, `sensitiveDataExposure`).
   - `maxRequestsPerEndpoint` (`int`): Optional per-endpoint burst count used by `rateLimit`; values are clamped by the validator safety limit.
+  - `downDetectionThreshold` (`int?`): Optional repeated-failure stop threshold. Defaults to 5, clamps to 3..10, and disables dependency-down detection when set to 0.
   - `parallelWorkers` (`int`): Worker pool capacity (defaults to 6).
   - `excludedPathPatterns` (`[]string`): Patterns of paths to skip.
 - **Auth Config** (`model.AuthConfig`): Masked auth context details.
@@ -32,6 +33,7 @@ Executes robustness test mutations against discovered endpoints to evaluate secu
        - `securityHeaders`: Reviews captured response headers for common hardening gaps.
        - `inventoryExposure`: Flags live versioned, legacy, deprecated, internal, debug, documentation, and operational routes.
        - `sensitiveDataExposure`: Reviews bounded response bodies for sensitive data classes and records only field/data categories, not values.
+       - `dependencyResilience`: Runs first by default and sends a bounded repeated request sequence to detect backend dependency or connection-pool failure signatures.
        - `rateLimit`: Sends a baseline request, a sequential controlled burst, and a post-burst comparison request. The burst uses `maxRequestsPerEndpoint` when provided, defaults to 5, and is clamped between 2 and 10 burst requests.
        - `httpMethodValidation`: Sends bounded alternate-method probes and flags unexpected 2xx responses.
        - `responseDiffing`: Sends two identical requests and compares status, content type, body size class, and body hash.

@@ -26,10 +26,13 @@ Use BendIt only against systems you own or are explicitly authorized to test. So
 - Native API list from `backend/Resources/api-list.txt`.
 - Custom API list file attachment from the dashboard.
 - Real HTTP test execution with verb-aware test routing and bounded response capture.
+- Early dependency resilience validation for backend pool/socket timeout and downstream dependency failure signatures.
+- API-down guard that stops a run after repeated near-identical failure responses to avoid wasting requests.
 - OWASP-mapped test results with per-result remediation guidance.
 - Security header validation for common API8 hardening gaps.
 - Authentication boundary probes for missing or malformed credentials without storing raw secrets.
 - BOLA/IDOR identifier mutation across path placeholders, numeric/UUID segments, and identifier-like query parameters.
+- SSRF-safe URL field validation using only documentation-reserved HTTP(S) hosts to check URL-field rejection behavior.
 - API inventory exposure detection for live legacy, versioned, internal, debug, documentation, and operational routes.
 - Sensitive data exposure detection that reports data classes without copying detected secret values into evidence.
 - Per-project local JSON artifacts under `bend-results/`.

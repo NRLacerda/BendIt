@@ -82,6 +82,7 @@ public sealed class TestRunRequest
     [JsonPropertyName("bendTypes")] public List<string> BendTypes { get; set; } = [];
     [JsonPropertyName("maxRequestsPerEndpoint")] public int MaxRequestsPerEndpoint { get; set; }
     [JsonPropertyName("parallelWorkers")] public int ParallelWorkers { get; set; }
+    [JsonPropertyName("downDetectionThreshold")] public int? DownDetectionThreshold { get; set; }
     [JsonPropertyName("fieldSizesKb")] public List<int> FieldSizesKb { get; set; } = [];
     [JsonPropertyName("bodySizesKb")] public List<int> BodySizesKb { get; set; } = [];
     [JsonPropertyName("excludedPathPatterns")] public List<string> ExcludedPathPatterns { get; set; } = [];
